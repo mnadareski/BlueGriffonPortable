@@ -175,8 +175,11 @@ var FileUtils = {
         //   window title loses the extra [filename] part that this adds
         EditorUtils.getCurrentEditorWindow().UpdateWindowTitle();
   
-        if (!aSaveCopy)
+        if (!aSaveCopy) {
           editor.resetModificationCount();
+          EditorUtils.getCurrentSourceWindow().ResetModificationCount();
+          EditorUtils.getCurrentEditorWindow().BespinChangeCallback();
+        }
         // this should cause notification to listeners that document has changed
   
         // Set UI based on whether we're editing a remote or local url
@@ -313,8 +316,11 @@ var FileUtils = {
         //   window title loses the extra [filename] part that this adds
         EditorUtils.getCurrentEditorWindow().UpdateWindowTitle();
   
-        if (!aSaveCopy)
+        if (!aSaveCopy) {
           editor.resetModificationCount();
+          EditorUtils.getCurrentSourceWindow().ResetModificationCount();
+          EditorUtils.getCurrentEditorWindow().BespinChangeCallback();
+        }
         // this should cause notification to listeners that document has changed
   
         // Set UI based on whether we're editing a remote or local url
@@ -395,8 +401,13 @@ var FileUtils = {
     // Set filters according to the type of output
     if (aDoSaveAsText)
       fp.appendFilters(this.nsIFilePicker.filterText);
-    else if (EditorUtils.isXHTMLDocument())
-      fp.appendFilter(L10NUtils.getString("XHTMLfiles"), "*.xhtml");
+    else if (EditorUtils.isXHTMLDocument()) {
+      if (EditorUtils.isPolyglotHtml5()) {
+        fp.appendFilters(this.nsIFilePicker.filterHTML);
+      }
+      else
+        fp.appendFilter(L10NUtils.getString("XHTMLfiles"), "*.xhtml");
+    }
     else {
       aMIMEType = "text/html";
       fp.appendFilters(this.nsIFilePicker.filterHTML);
@@ -404,9 +415,13 @@ var FileUtils = {
     fp.appendFilters(this.nsIFilePicker.filterAll);
   
     // now let's actually set the filepicker's suggested filename
-    var suggestedFileName = this.getSuggestedFileName(aDocumentURLString, aMIMEType);
-    if (suggestedFileName)
-      fp.defaultString = suggestedFileName;
+    var suggestion = this.getSuggestedFileName(aDocumentURLString, aMIMEType);
+    if (suggestion) {
+      if (suggestion.filename)
+        fp.defaultString = suggestion.filename;
+      if (suggestion.extension)
+        fp.defaultExtension = suggestion.extension;
+    }
   
     // set the file picker's current directory
     // assuming we have information needed (like prior saved location)
@@ -478,19 +493,20 @@ var FileUtils = {
   
         // grab the file name
         if (docURI.fileExtension.toLowerCase() == "php")
-          return unescape(docURI.fileName);
+          return { filename: decodeURI(docURI.fileName), extension: extension};
 
         var url = docURI.fileBaseName;
         if (url)
-          return unescape(url+extension);
+          return { filename: decodeURI(url+extension), extension: extension};
       } catch(e) {}
     } 
   
     // check if there is a title we can use
     var title = EditorUtils.getDocumentTitle();
     // generate a valid filename, if we can't just go with "untitled"
-    return this.generateValidFilename(title, extension) ||
-           L10NUtils.getString("untitled") + extension;
+    return { filename: this.generateValidFilename(title, extension)
+                       || L10NUtils.getString("untitled") + extension,
+             extension: extension };
   },
 
   setFilePickerDirectory: function(filePicker, fileType)
@@ -545,9 +561,19 @@ var FileUtils = {
 
   getExtensionBasedOnMimeType: function(aMIMEType)
   {
-    /*if (CurrentDocumentIsTemplate())
-      return "mzt";*/
-  
+    if (EditorUtils.isPolyglotHtml5()) {
+      aMIMEType = "text/html";
+    }
+
+    try {
+      var preferred = Services.prefs.getCharPref(
+                        "bluegriffon.defaults.extension."
+                        + aMIMEType.replace( /\//g, "-"));
+      if (preferred)
+        return preferred;
+    }
+    catch (e) {}
+
     try {
       var mimeService = null;
       mimeService = Components.classes["@mozilla.org/mime;1"].getService();

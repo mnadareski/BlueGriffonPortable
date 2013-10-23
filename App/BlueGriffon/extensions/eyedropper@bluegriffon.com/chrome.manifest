@@ -1,0 +1,5 @@
+style chrome://bluegriffon/content/xul/bluegriffon.xul chrome://eyedropper/skin/eyedropperOverlay.css
+overlay chrome://bluegriffon/content/xul/colourPicker.xul chrome://eyedropper/content/eyedropperOverlay.xul
+skin eyedropper classic/1.0 jar:chrome.jar!/eyedropper/skin/
+content eyedropper jar:chrome.jar!/eyedropper/content/
+locale eyedropper en-US jar:chrome.jar!/eyedropper-locale/locale/en-US/

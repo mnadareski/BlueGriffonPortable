@@ -1,7 +1,8 @@
 /* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
-/*
-//@line 38 "c:\trees\official1.4\toolkit\mozapps\update\nsUpdateServiceStub.js"
-*/
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
 Components.utils.import("resource://gre/modules/XPCOMUtils.jsm");
 Components.utils.import("resource://gre/modules/FileUtils.jsm");
 
@@ -10,26 +11,18 @@ const Ci = Components.interfaces;
 const DIR_UPDATES         = "updates";
 const FILE_UPDATE_STATUS  = "update.status";
 
-const KEY_APPDIR          = "XCurProcD";
-
-//@line 54 "c:\trees\official1.4\toolkit\mozapps\update\nsUpdateServiceStub.js"
-
-//@line 56 "c:\trees\official1.4\toolkit\mozapps\update\nsUpdateServiceStub.js"
 const KEY_UPDROOT         = "UpdRootD";
-//@line 58 "c:\trees\official1.4\toolkit\mozapps\update\nsUpdateServiceStub.js"
 
 /**
-//@line 66 "c:\trees\official1.4\toolkit\mozapps\update\nsUpdateServiceStub.js"
+ * Gets the specified directory at the specified hierarchy under the update root
+ * directory without creating it if it doesn't exist.
+ * @param   pathArray
+ *          An array of path components to locate beneath the directory
+ *          specified by |key|
+ * @return  nsIFile object for the location specified.
  */
 function getUpdateDirNoCreate(pathArray) {
-//@line 69 "c:\trees\official1.4\toolkit\mozapps\update\nsUpdateServiceStub.js"
-  try {
-    let dir = FileUtils.getDir(KEY_UPDROOT, pathArray, false);
-    return dir;
-  } catch (e) {
-  }
-//@line 75 "c:\trees\official1.4\toolkit\mozapps\update\nsUpdateServiceStub.js"
-  return FileUtils.getDir(KEY_APPDIR, pathArray, false);
+  return FileUtils.getDir(KEY_UPDROOT, pathArray, false);
 }
 
 function UpdateServiceStub() {
@@ -49,4 +42,4 @@ UpdateServiceStub.prototype = {
   QueryInterface: XPCOMUtils.generateQI([Ci.nsIObserver])
 };
 
-var NSGetFactory = XPCOMUtils.generateNSGetFactory([UpdateServiceStub]);
+this.NSGetFactory = XPCOMUtils.generateNSGetFactory([UpdateServiceStub]);

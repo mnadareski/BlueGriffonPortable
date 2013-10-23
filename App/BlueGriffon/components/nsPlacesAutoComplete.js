@@ -1,46 +1,17 @@
 /* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*-
  * vim: sw=2 ts=2 sts=2 expandtab
- * ***** BEGIN LICENSE BLOCK *****
- * Version: MPL 1.1/GPL 2.0/LGPL 2.1
- *
- * The contents of this file are subject to the Mozilla Public License Version
- * 1.1 (the "License"); you may not use this file except in compliance with
- * the License. You may obtain a copy of the License at
- * http://www.mozilla.org/MPL/
- *
- * Software distributed under the License is distributed on an "AS IS" basis,
- * WITHOUT WARRANTY OF ANY KIND, either express or implied. See the License
- * for the specific language governing rights and limitations under the
- * License.
- *
- * The Original Code is mozilla.org code.
- *
- * The Initial Developer of the Original Code is
- * the Mozilla Foundation.
- * Portions created by the Initial Developer are Copyright (C) 2008
- * the Initial Developer. All Rights Reserved.
- *
- * Contributor(s):
- *   Shawn Wilsher <me@shawnwilsher.com> (Original Author)
- *
- * Alternatively, the contents of this file may be used under the terms of
- * either the GNU General Public License Version 2 or later (the "GPL"), or
- * the GNU Lesser General Public License Version 2.1 or later (the "LGPL"),
- * in which case the provisions of the GPL or the LGPL are applicable instead
- * of those above. If you wish to allow use of your version of this file only
- * under the terms of either the GPL or the LGPL, and not to allow others to
- * use your version of this file under the terms of the MPL, indicate your
- * decision by deleting the provisions above and replace them with the notice
- * and other provisions required by the GPL or the LGPL. If you do not delete
- * the provisions above, a recipient may use your version of this file under
- * the terms of any one of the MPL, the GPL or the LGPL.
- *
- * ***** END LICENSE BLOCK ***** */
+ * This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 Components.utils.import("resource://gre/modules/XPCOMUtils.jsm");
 Components.utils.import("resource://gre/modules/Services.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "PlacesUtils",
                                   "resource://gre/modules/PlacesUtils.jsm");
+XPCOMUtils.defineLazyModuleGetter(this, "TelemetryStopwatch",
+                                  "resource://gre/modules/TelemetryStopwatch.jsm");
+XPCOMUtils.defineLazyModuleGetter(this, "NetUtil",
+                                  "resource://gre/modules/NetUtil.jsm");
 
 ////////////////////////////////////////////////////////////////////////////////
 //// Constants
@@ -103,11 +74,15 @@ const kQueryTypeFiltered = 1;
 const kTitleTagsSeparator = " \u2013 ";
 
 const kBrowserUrlbarBranch = "browser.urlbar.";
-
+// Toggle autocomplete.
+const kBrowserUrlbarAutocompleteEnabledPref = "autocomplete.enabled";
 // Toggle autoFill.
 const kBrowserUrlbarAutofillPref = "autoFill";
 // Whether to search only typed entries.
 const kBrowserUrlbarAutofillTypedPref = "autoFill.typed";
+
+// The Telemetry histogram for urlInlineComplete query on domain
+const DOMAIN_QUERY_TELEMETRY = "PLACES_AUTOCOMPLETE_URLINLINE_DOMAIN_QUERY_TIME_MS";
 
 ////////////////////////////////////////////////////////////////////////////////
 //// Globals
@@ -163,6 +138,19 @@ function initTempTable(aDatabase)
  */
 function fixupSearchText(aURIString)
 {
+  let uri = stripPrefix(aURIString);
+  return gTextURIService.unEscapeURIForUI("UTF-8", uri);
+}
+
+/**
+ * Strip prefixes from the URI that we don't care about for searching.
+ *
+ * @param aURIString
+ *        The text to modify.
+ * @return the modified uri.
+ */
+function stripPrefix(aURIString)
+{
   let uri = aURIString;
 
   if (uri.indexOf("http://") == 0) {
@@ -178,8 +166,7 @@ function fixupSearchText(aURIString)
   if (uri.indexOf("www.") == 0) {
     uri = uri.slice(4);
   }
-
-  return gTextURIService.unEscapeURIForUI("UTF-8", uri);
+  return uri;
 }
 
 /**
@@ -319,10 +306,7 @@ function nsPlacesAutoComplete()
     // to our own in-memory temp table, and having a cloned copy means we do not
     // run the risk of our queries taking longer due to the main database
     // connection performing a long-running task.
-    let db = Cc["@mozilla.org/browser/nav-history-service;1"].
-             getService(Ci.nsPIPlacesDatabase).
-             DBConnection.
-             clone(true);
+    let db = PlacesUtils.history.DBConnection.clone(true);
 
     // Autocomplete often fallbacks to a table scan due to lack of text indices.
     // In such cases a larger cache helps reducing IO.  The default Storage
@@ -353,22 +337,6 @@ function nsPlacesAutoComplete()
 
     return db;
   });
-
-  XPCOMUtils.defineLazyServiceGetter(this, "_bh",
-                                     "@mozilla.org/browser/global-history;2",
-                                     "nsIBrowserHistory");
-
-  XPCOMUtils.defineLazyServiceGetter(this, "_bs",
-                                     "@mozilla.org/browser/nav-bookmarks-service;1",
-                                     "nsINavBookmarksService");
-
-  XPCOMUtils.defineLazyServiceGetter(this, "_ioService",
-                                     "@mozilla.org/network/io-service;1",
-                                     "nsIIOService");
-
-  XPCOMUtils.defineLazyServiceGetter(this, "_faviconService",
-                                     "@mozilla.org/browser/favicon-service;1",
-                                     "nsIFaviconService");
 
   XPCOMUtils.defineLazyGetter(this, "_defaultQuery", function() {
     let replacementText = "";
@@ -596,7 +564,7 @@ nsPlacesAutoComplete.prototype = {
   onValueRemoved: function PAC_onValueRemoved(aResult, aURISpec, aRemoveFromDB)
   {
     if (aRemoveFromDB) {
-      this._bh.removePage(this._ioService.newURI(aURISpec, null, null));
+      PlacesUtils.history.removePage(NetUtil.newURI(aURISpec));
     }
   },
 
@@ -639,7 +607,7 @@ nsPlacesAutoComplete.prototype = {
   handleResult: function PAC_handleResult(aResultSet)
   {
     let row, haveMatches = false;
-    while (row = aResultSet.getNextRow()) {
+    while ((row = aResultSet.getNextRow())) {
       let match = this._processRow(row);
       haveMatches = haveMatches || match;
 
@@ -845,7 +813,9 @@ nsPlacesAutoComplete.prototype = {
    */
   _loadPrefs: function PAC_loadPrefs(aRegisterObserver)
   {
-    this._enabled = safePrefGetter(this._prefs, "autocomplete.enabled", true);
+    this._enabled = safePrefGetter(this._prefs,
+                                   kBrowserUrlbarAutocompleteEnabledPref,
+                                   true);
     this._matchBehavior = safePrefGetter(this._prefs,
                                          "matchBehavior",
                                          MATCH_BOUNDARY_ANYWHERE);
@@ -974,7 +944,7 @@ nsPlacesAutoComplete.prototype = {
 
     // Bind the needed parameters to the query so consumers can use it.
     let (params = query.params) {
-      params.parent = this._bs.tagsFolder;
+      params.parent = PlacesUtils.tagsFolderId;
       params.query_type = kQueryTypeFiltered;
       params.matchBehavior = aMatchBehavior;
       params.searchBehavior = this._behavior;
@@ -1056,7 +1026,7 @@ nsPlacesAutoComplete.prototype = {
 
     let query = this._adaptiveQuery;
     let (params = query.params) {
-      params.parent = this._bs.tagsFolder;
+      params.parent = PlacesUtils.tagsFolderId;
       params.search_string = this._currentSearchString;
       params.query_type = kQueryTypeFiltered;
       params.matchBehavior = aMatchBehavior;
@@ -1207,10 +1177,10 @@ nsPlacesAutoComplete.prototype = {
     // Obtain the favicon for this URI.
     let favicon;
     if (aFaviconSpec) {
-      let uri = this._ioService.newURI(aFaviconSpec, null, null);
-      favicon = this._faviconService.getFaviconLinkForIcon(uri).spec;
+      let uri = NetUtil.newURI(aFaviconSpec);
+      favicon = PlacesUtils.favicons.getFaviconLinkForIcon(uri).spec;
     }
-    favicon = favicon || this._faviconService.defaultFavicon.spec;
+    favicon = favicon || PlacesUtils.favicons.defaultFavicon.spec;
 
     this._result.appendMatch(aURISpec, aTitle, favicon, aStyle);
   },
@@ -1301,9 +1271,8 @@ urlInlineComplete.prototype = {
 
   get _db()
   {
-    if (!this.__db && this._autofill) {
-      this.__db = PlacesUtils.history.QueryInterface(Ci.nsPIPlacesDatabase).
-                  DBConnection.clone(true);
+    if (!this.__db && this._autofillEnabled) {
+      this.__db = PlacesUtils.history.DBConnection.clone(true);
     }
     return this.__db;
   },
@@ -1317,7 +1286,7 @@ urlInlineComplete.prototype = {
       // want to complete up to and including a URL separator.
       this.__syncQuery = this._db.createStatement(
           "/* do not warn (bug no): could index on (typed,frecency) but not worth it */ "
-        + "SELECT host || '/' "
+        + "SELECT host || '/', prefix || host || '/' "
         + "FROM moz_hosts "
         + "WHERE host BETWEEN :search_string AND :search_string || X'FFFF' "
         + "AND frecency <> 0 "
@@ -1408,19 +1377,34 @@ urlInlineComplete.prototype = {
     let lastSlashIndex = this._currentSearchString.lastIndexOf("/");
     if (lastSlashIndex == -1) {
       var hasDomainResult = false;
-      var domain;
+      var domain, untrimmedDomain;
+      TelemetryStopwatch.start(DOMAIN_QUERY_TELEMETRY);
       try {
+        // Execute the query synchronously.
+        // This is by design, to avoid race conditions between the
+        // user typing and the connection searching for the result.
         hasDomainResult = query.executeStep();
         if (hasDomainResult) {
           domain = query.getString(0);
+          untrimmedDomain = query.getString(1);
         }
       } finally {
         query.reset();
       }
+      TelemetryStopwatch.finish(DOMAIN_QUERY_TELEMETRY);
 
       if (hasDomainResult) {
         // We got a match for a domain, we can add it immediately.
-        result.appendMatch(this._strippedPrefix + domain, "");
+        // If the untrimmed value doesn't preserve the user's input just
+        // ignore it and complete to the found domain.
+        if (untrimmedDomain &&
+            !untrimmedDomain.toLowerCase().contains(this._originalSearchString.toLowerCase())) {
+          untrimmedDomain = null;
+        }
+
+        // TODO (bug 754265): this is a temporary solution introduced while
+        // waiting for a propert dedicated API.
+        result.appendMatch(this._strippedPrefix + domain, untrimmedDomain);
 
         this._finishSearch();
         return;
@@ -1486,9 +1470,13 @@ urlInlineComplete.prototype = {
   _loadPrefs: function UIC_loadPrefs(aRegisterObserver)
   {
     let prefBranch = Services.prefs.getBranch(kBrowserUrlbarBranch);
-    this._autofill = safePrefGetter(prefBranch,
-                                    kBrowserUrlbarAutofillPref,
-                                    true);
+    let autocomplete = safePrefGetter(prefBranch,
+                                      kBrowserUrlbarAutocompleteEnabledPref,
+                                      true);
+    let autofill = safePrefGetter(prefBranch,
+                                  kBrowserUrlbarAutofillPref,
+                                  true);
+    this._autofillEnabled = autocomplete && autofill;
     this._autofillTyped = safePrefGetter(prefBranch,
                                          kBrowserUrlbarAutofillTypedPref,
                                          true);
@@ -1507,7 +1495,10 @@ urlInlineComplete.prototype = {
   handleResult: function UIC_handleResult(aResultSet)
   {
     let row = aResultSet.getNextRow();
-    let url = fixupSearchText(row.getResultByIndex(0));
+    let value = row.getResultByIndex(0);
+    let url = fixupSearchText(value);
+
+    let prefix = value.slice(0, value.length - stripPrefix(value).length);
 
     // We must complete the URL up to the next separator (which is /, ? or #).
     let separatorIndex = url.slice(this._currentSearchString.length)
@@ -1520,8 +1511,18 @@ urlInlineComplete.prototype = {
       url = url.slice(0, separatorIndex);
     }
 
-    // Add the result
-    this._result.appendMatch(this._strippedPrefix + url, "");
+    // Add the result.
+    // If the untrimmed value doesn't preserve the user's input just
+    // ignore it and complete to the found url.
+    let untrimmedURL = prefix + url;
+    if (untrimmedURL &&
+        !untrimmedURL.toLowerCase().contains(this._originalSearchString.toLowerCase())) {
+      untrimmedURL = null;
+     }
+
+    // TODO (bug 754265): this is a temporary solution introduced while
+    // waiting for a propert dedicated API.
+    this._result.appendMatch(this._strippedPrefix + url, untrimmedURL);
 
     // handleCompletion() will cause the result listener to be called, and
     // will display the result in the UI.
@@ -1548,10 +1549,11 @@ urlInlineComplete.prototype = {
     }
     else if (aTopic == kPrefChanged &&
              (aData.substr(kBrowserUrlbarBranch.length) == kBrowserUrlbarAutofillPref ||
+              aData.substr(kBrowserUrlbarBranch.length) == kBrowserUrlbarAutocompleteEnabledPref ||
               aData.substr(kBrowserUrlbarBranch.length) == kBrowserUrlbarAutofillTypedPref)) {
       let previousAutofillTyped = this._autofillTyped;
       this._loadPrefs();
-      if (!this._autofill) {
+      if (!this._autofillEnabled) {
         this.stopSearch();
         this._closeDatabase();
       }
@@ -1641,4 +1643,4 @@ urlInlineComplete.prototype = {
 };
 
 let components = [nsPlacesAutoComplete, urlInlineComplete];
-const NSGetFactory = XPCOMUtils.generateNSGetFactory(components);
+this.NSGetFactory = XPCOMUtils.generateNSGetFactory(components);

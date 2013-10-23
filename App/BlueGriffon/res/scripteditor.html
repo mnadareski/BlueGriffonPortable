@@ -15,7 +15,6 @@
     }
     .CodeMirror-scroll {height: 100% ! important}
     .CodeMirror-gutter {cursor: pointer;}
-    .activeline {background: #f0fcff !important;}
   </style>
   <link rel="stylesheet" href="cm2/codemirror.css" />
   <link rel="stylesheet" href="cm2/foldtag.css" />
@@ -33,6 +32,7 @@
   <link rel="stylesheet" id="theme" type="text/css" href="cm2/neat.css" />
   <link rel="stylesheet" id="theme" type="text/css" href="cm2/night.css" />
   <link rel="stylesheet" id="theme" type="text/css" href="cm2/rubyblue.css" />
+  <link rel="stylesheet"            type="text/css" href="cm2/code-completion.css">  
 </head>
 <body>
 
@@ -84,6 +84,8 @@
     var hlLine = gEditor.setLineClass(0, "activeline");
     getEditableElement().addEventListener("keypress", gKeyPressCallback, true);
     gEditor.setValue(gInitialValue);
+    gEditor.clearHistory();
+    gEditor.ResetModificationCount();
     gEditor.focus();
    };
 
@@ -106,6 +108,41 @@
     gChangeCallback = aChangeCallback;
     gTheme = aTheme;
     gInitialValue = aValue;
+  }
+
+  function findNeedle(aForward, aInitial, aNeedle, aIsCaseSensitive)
+  {
+    var found = false;
+    if (aInitial || !gEditor.lastNeedle) {
+      var selection = gEditor.getCursor(true);
+      gEditor.lastNeedle = gEditor.getSearchCursor(aNeedle, { line: selection.line, ch: selection.ch }, aIsCaseSensitive);
+      found = gEditor.lastNeedle.findNext();
+    }
+    else {
+      if (aForward) {
+        found = gEditor.lastNeedle.findNext();
+      }
+      else {
+        found = gEditor.lastNeedle.findPrevious();
+      }
+    }
+
+    if (!found) { // maybe we hit the document's limits
+      if (aForward) {
+        gEditor.lastNeedle = gEditor.getSearchCursor(aNeedle, { line: 0, ch: 0 }, aIsCaseSensitive);
+        found = gEditor.lastNeedle.findNext();
+      }
+      else {
+        var line = gEditor.lineCount() - 1;
+        var lineProse = gEditor.getLine(line);
+        gEditor.lastNeedle = gEditor.getSearchCursor(aNeedle, { line: line, ch: lineProse.length }, aIsCaseSensitive);
+        found = gEditor.lastNeedle.findPrevious();
+      }
+    }
+    if (found)
+      gEditor.setSelection(gEditor.lastNeedle.from(), gEditor.lastNeedle.to());
+
+    return found;
   }
 </script>
 </body>

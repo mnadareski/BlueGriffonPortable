@@ -1,43 +1,8 @@
 /* -*- Mode: javascript; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 /* vim: set ft=javascript ts=2 et sw=2 tw=80: */
-/* ***** BEGIN LICENSE BLOCK *****
- * Version: MPL 1.1/GPL 2.0/LGPL 2.1
- *
- * The contents of this file are subject to the Mozilla Public License Version
- * 1.1 (the "License"); you may not use this file except in compliance with
- * the License. You may obtain a copy of the License at
- * http://www.mozilla.org/MPL/
- *
- * Software distributed under the License is distributed on an "AS IS" basis,
- * WITHOUT WARRANTY OF ANY KIND, either express or implied. See the License
- * for the specific language governing rights and limitations under the
- * License.
- *
- * The Original Code is Mozilla Debug Protocol Client code.
- *
- * The Initial Developer of the Original Code is
- *   Mozilla Foundation
- * Portions created by the Initial Developer are Copyright (C) 2011
- * the Initial Developer. All Rights Reserved.
- *
- * Contributor(s):
- *   Dave Camp <dcamp@mozilla.com> (original author)
- *   Panos Astithas <past@mozilla.com>
- *   Mihai Sucan <mihai.sucan@gmail.com>
- *
- * Alternatively, the contents of this file may be used under the terms of
- * either the GNU General Public License Version 2 or later (the "GPL"), or
- * the GNU Lesser General Public License Version 2.1 or later (the "LGPL"),
- * in which case the provisions of the GPL or the LGPL are applicable instead
- * of those above. If you wish to allow use of your version of this file only
- * under the terms of either the GPL or the LGPL, and not to allow others to
- * use your version of this file under the terms of the MPL, indicate your
- * decision by deleting the provisions above and replace them with the notice
- * and other provisions required by the GPL or the LGPL. If you do not delete
- * the provisions above, a recipient may use your version of this file under
- * the terms of any one of the MPL, the GPL or the LGPL.
- *
- * ***** END LICENSE BLOCK ***** */
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 "use strict";
 const Ci = Components.interfaces;
@@ -45,17 +10,24 @@ const Cc = Components.classes;
 const Cu = Components.utils;
 const Cr = Components.results;
 
-var EXPORTED_SYMBOLS = ["DebuggerTransport",
-                        "DebuggerClient",
-                        "debuggerSocketConnect"];
+this.EXPORTED_SYMBOLS = ["DebuggerTransport",
+                         "DebuggerClient",
+                         "debuggerSocketConnect",
+                         "LongStringClient",
+                         "GripClient"];
 
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 Cu.import("resource://gre/modules/NetUtil.jsm");
 Cu.import("resource://gre/modules/Services.jsm");
+Cu.import("resource://gre/modules/commonjs/sdk/core/promise.js");
+const { defer, resolve, reject } = Promise;
 
 XPCOMUtils.defineLazyServiceGetter(this, "socketTransportService",
                                    "@mozilla.org/network/socket-transport-service;1",
                                    "nsISocketTransportService");
+
+XPCOMUtils.defineLazyModuleGetter(this, "WebConsoleClient",
+                                  "resource://gre/modules/devtools/WebConsoleClient.jsm");
 
 let wantLogging = Services.prefs.getBoolPref("devtools.debugger.log");
 
@@ -68,7 +40,7 @@ function dumpn(str)
 
 let loader = Cc["@mozilla.org/moz/jssubscript-loader;1"]
   .getService(Ci.mozIJSSubScriptLoader);
-loader.loadSubScript("chrome://global/content/devtools/dbg-transport.js");
+loader.loadSubScript("chrome://global/content/devtools/dbg-transport.js", this);
 
 /**
  * Add simple event notification to a prototype object. Any object that has
@@ -84,23 +56,19 @@ function eventSource(aProto) {
    * Add a listener to the event source for a given event.
    *
    * @param aName string
-   *        The event to listen for, or null to listen to all events.
+   *        The event to listen for.
    * @param aListener function
    *        Called when the event is fired. If the same listener
-   *        is added more the once, it will be called once per
+   *        is added more than once, it will be called once per
    *        addListener call.
    */
   aProto.addListener = function EV_addListener(aName, aListener) {
     if (typeof aListener != "function") {
-      return;
+      throw TypeError("Listeners must be functions.");
     }
 
     if (!this._listeners) {
       this._listeners = {};
-    }
-
-    if (!aName) {
-      aName = '*';
     }
 
     this._getListeners(aName).push(aListener);
@@ -111,8 +79,7 @@ function eventSource(aProto) {
    * listener will be removed after it is called for the first time.
    *
    * @param aName string
-   *        The event to listen for, or null to respond to the first event
-   *        fired by the object.
+   *        The event to listen for.
    * @param aListener function
    *        Called when the event is fired.
    */
@@ -175,16 +142,15 @@ function eventSource(aProto) {
 
     let name = arguments[0];
     let listeners = this._getListeners(name).slice(0);
-    if (this._listeners['*']) {
-      listeners.concat(this._listeners['*']);
-    }
 
     for each (let listener in listeners) {
       try {
         listener.apply(null, arguments);
       } catch (e) {
         // Prevent a bad listener from interfering with the others.
-        Cu.reportError(e);
+        let msg = e + ": " + e.stack;
+        Cu.reportError(msg);
+        dumpn(msg);
       }
     }
   }
@@ -205,31 +171,29 @@ const ThreadStateTypes = {
  * by the client.
  */
 const UnsolicitedNotifications = {
+  "consoleAPICall": "consoleAPICall",
+  "eventNotification": "eventNotification",
+  "fileActivity": "fileActivity",
+  "networkEvent": "networkEvent",
+  "networkEventUpdate": "networkEventUpdate",
+  "newGlobal": "newGlobal",
   "newScript": "newScript",
+  "newSource": "newSource",
   "tabDetached": "tabDetached",
-  "tabNavigated": "tabNavigated"
+  "tabNavigated": "tabNavigated",
+  "pageError": "pageError",
+  "webappsEvent": "webappsEvent"
 };
 
 /**
- * Set of debug protocol request types that specify the protocol request being
- * sent to the server.
+ * Set of pause types that are sent by the server and not as an immediate
+ * response to a client request.
  */
-const DebugProtocolTypes = {
-  "attach": "attach",
-  "clientEvaluate": "clientEvaluate",
-  "delete": "delete",
-  "detach": "detach",
-  "frames": "frames",
-  "interrupt": "interrupt",
-  "listTabs": "listTabs",
-  "nameAndParameters": "nameAndParameters",
-  "ownPropertyNames": "ownPropertyNames",
-  "property": "property",
-  "prototype": "prototype",
-  "prototypeAndProperties": "prototypeAndProperties",
-  "resume": "resume",
-  "scripts": "scripts",
-  "setBreakpoint": "setBreakpoint"
+const UnsolicitedPauses = {
+  "resumeLimit": "resumeLimit",
+  "debuggerStatement": "debuggerStatement",
+  "breakpoint": "breakpoint",
+  "watchpoint": "watchpoint"
 };
 
 const ROOT_ACTOR_NAME = "root";
@@ -239,16 +203,21 @@ const ROOT_ACTOR_NAME = "root";
  * provides the means to communicate with the server and exchange the messages
  * required by the protocol in a traditional JavaScript API.
  */
-function DebuggerClient(aTransport)
+this.DebuggerClient = function DebuggerClient(aTransport)
 {
   this._transport = aTransport;
   this._transport.hooks = this;
   this._threadClients = {};
   this._tabClients = {};
+  this._consoleClients = {};
 
   this._pendingRequests = [];
   this._activeRequests = {};
   this._eventsEnabled = true;
+
+  this.compat = new ProtocolCompatibility(this, [
+    new SourcesShim(),
+  ]);
 }
 
 DebuggerClient.prototype = {
@@ -300,10 +269,32 @@ DebuggerClient.prototype = {
       }
     }.bind(this);
 
-    if (this.activeThread) {
-      this.activeThread.detach(detachTab);
-    } else {
-      detachTab();
+    let detachThread = function _detachThread() {
+      if (this.activeThread) {
+        this.activeThread.detach(detachTab);
+      } else {
+        detachTab();
+      }
+    }.bind(this);
+
+    let consolesClosed = 0;
+    let consolesToClose = 0;
+
+    let onConsoleClose = function _onConsoleClose() {
+      consolesClosed++;
+      if (consolesClosed >= consolesToClose) {
+        this._consoleClients = {};
+        detachThread();
+      }
+    }.bind(this);
+
+    for each (let client in this._consoleClients) {
+      consolesToClose++;
+      client.close(onConsoleClose);
+    }
+
+    if (!consolesToClose) {
+      detachThread();
     }
   },
 
@@ -314,7 +305,7 @@ DebuggerClient.prototype = {
    *        Called with the response packet.
    */
   listTabs: function DC_listTabs(aOnResponse) {
-    let packet = { to: ROOT_ACTOR_NAME, type: DebugProtocolTypes.listTabs };
+    let packet = { to: ROOT_ACTOR_NAME, type: "listTabs" };
     this.request(packet, function(aResponse) {
       aOnResponse(aResponse);
     });
@@ -331,14 +322,45 @@ DebuggerClient.prototype = {
    */
   attachTab: function DC_attachTab(aTabActor, aOnResponse) {
     let self = this;
-    let packet = { to: aTabActor, type: DebugProtocolTypes.attach };
+    let packet = { to: aTabActor, type: "attach" };
     this.request(packet, function(aResponse) {
+      let tabClient;
       if (!aResponse.error) {
-        var tabClient = new TabClient(self, aTabActor);
+        tabClient = new TabClient(self, aTabActor);
         self._tabClients[aTabActor] = tabClient;
         self.activeTab = tabClient;
       }
       aOnResponse(aResponse, tabClient);
+    });
+  },
+
+  /**
+   * Attach to a Web Console actor.
+   *
+   * @param string aConsoleActor
+   *        The ID for the console actor to attach to.
+   * @param array aListeners
+   *        The console listeners you want to start.
+   * @param function aOnResponse
+   *        Called with the response packet and a WebConsoleClient
+   *        instance (which will be undefined on error).
+   */
+  attachConsole:
+  function DC_attachConsole(aConsoleActor, aListeners, aOnResponse) {
+    let self = this;
+    let packet = {
+      to: aConsoleActor,
+      type: "startListeners",
+      listeners: aListeners,
+    };
+
+    this.request(packet, function(aResponse) {
+      let consoleClient;
+      if (!aResponse.error) {
+        consoleClient = new WebConsoleClient(self, aConsoleActor);
+        self._consoleClients[aConsoleActor] = consoleClient;
+      }
+      aOnResponse(aResponse, consoleClient);
     });
   },
 
@@ -353,7 +375,7 @@ DebuggerClient.prototype = {
    */
   attachThread: function DC_attachThread(aThreadActor, aOnResponse) {
     let self = this;
-    let packet = { to: aThreadActor, type: DebugProtocolTypes.attach };
+    let packet = { to: aThreadActor, type: "attach" };
     this.request(packet, function(aResponse) {
       if (!aResponse.error) {
         var threadClient = new ThreadClient(self, aThreadActor);
@@ -362,6 +384,23 @@ DebuggerClient.prototype = {
       }
       aOnResponse(aResponse, threadClient);
     });
+  },
+
+  /**
+   * Release an object actor.
+   *
+   * @param string aActor
+   *        The actor ID to send the request to.
+   * @param aOnResponse function
+   *        If specified, will be called with the response packet when
+   *        debugging server responds.
+   */
+  release: function DC_release(aActor, aOnResponse) {
+    let packet = {
+      to: aActor,
+      type: "release",
+    };
+    this.request(packet, aOnResponse);
   },
 
   /**
@@ -375,10 +414,11 @@ DebuggerClient.prototype = {
    */
   request: function DC_request(aRequest, aOnResponse) {
     if (!this._connected) {
-      throw "Have not yet received a hello packet from the server.";
+      throw Error("Have not yet received a hello packet from the server.");
     }
     if (!aRequest.to) {
-      throw "Request packet has no destination.";
+      let type = aRequest.type || "";
+      throw Error("'" + type + "' request packet has no destination.");
     }
 
     this._pendingRequests.push({ to: aRequest.to,
@@ -412,48 +452,73 @@ DebuggerClient.prototype = {
    *
    * @param aPacket object
    *        The incoming packet.
+   * @param aIgnoreCompatibility boolean
+   *        Set true to not pass the packet through the compatibility layer.
    */
-  onPacket: function DC_onPacket(aPacket) {
-    if (!this._connected) {
-      // Hello packet.
-      this._connected = true;
-      this.notify("connected",
-                  aPacket.applicationType,
-                  aPacket.traits);
-      return;
-    }
+  onPacket: function DC_onPacket(aPacket, aIgnoreCompatibility=false) {
+    let packet = aIgnoreCompatibility
+      ? aPacket
+      : this.compat.onPacket(aPacket);
 
-    try {
-      if (!aPacket.from) {
-        Cu.reportError("Server did not specify an actor, dropping packet: " +
-                       JSON.stringify(aPacket));
+    resolve(packet).then(function (aPacket) {
+      if (!this._connected) {
+        // Hello packet.
+        this._connected = true;
+        this.notify("connected",
+                    aPacket.applicationType,
+                    aPacket.traits);
         return;
       }
 
-      let onResponse;
-      // Don't count unsolicited notifications as responses.
-      if (aPacket.from in this._activeRequests &&
-          !(aPacket.type in UnsolicitedNotifications)) {
-        onResponse = this._activeRequests[aPacket.from].onResponse;
-        delete this._activeRequests[aPacket.from];
+      try {
+        if (!aPacket.from) {
+          let msg = "Server did not specify an actor, dropping packet: " +
+                    JSON.stringify(aPacket);
+          Cu.reportError(msg);
+          dumpn(msg);
+          return;
+        }
+
+        let onResponse;
+        // Don't count unsolicited notifications or pauses as responses.
+        if (aPacket.from in this._activeRequests &&
+            !(aPacket.type in UnsolicitedNotifications) &&
+            !(aPacket.type == ThreadStateTypes.paused &&
+              aPacket.why.type in UnsolicitedPauses)) {
+          onResponse = this._activeRequests[aPacket.from].onResponse;
+          delete this._activeRequests[aPacket.from];
+        }
+
+        // Packets that indicate thread state changes get special treatment.
+        if (aPacket.type in ThreadStateTypes &&
+            aPacket.from in this._threadClients) {
+          this._threadClients[aPacket.from]._onThreadState(aPacket);
+        }
+        // On navigation the server resumes, so the client must resume as well.
+        // We achieve that by generating a fake resumption packet that triggers
+        // the client's thread state change listeners.
+        if (this.activeThread &&
+            aPacket.type == UnsolicitedNotifications.tabNavigated &&
+            aPacket.from in this._tabClients) {
+          let resumption = { from: this.activeThread._actor, type: "resumed" };
+          this.activeThread._onThreadState(resumption);
+        }
+        // Only try to notify listeners on events, not responses to requests
+        // that lack a packet type.
+        if (aPacket.type) {
+          this.notify(aPacket.type, aPacket);
+        }
+
+        if (onResponse) {
+          onResponse(aPacket);
+        }
+      } catch(ex) {
+        dumpn("Error handling response: " + ex + " - stack:\n" + ex.stack);
+        Cu.reportError(ex + "\n" + ex.stack);
       }
 
-      // paused/resumed/detached get special treatment...
-      if (aPacket.type in ThreadStateTypes &&
-          aPacket.from in this._threadClients) {
-        this._threadClients[aPacket.from]._onThreadState(aPacket);
-      }
-      this.notify(aPacket.type, aPacket);
-
-      if (onResponse) {
-        onResponse(aPacket);
-      }
-    } catch(ex) {
-      dumpn("Error handling response: " + ex + " - " + ex.stack);
-      Cu.reportError(ex);
-    }
-
-    this._sendRequests();
+      this._sendRequests();
+    }.bind(this));
   },
 
   /**
@@ -469,6 +534,194 @@ DebuggerClient.prototype = {
 }
 
 eventSource(DebuggerClient.prototype);
+
+// Constants returned by `FeatureCompatibilityShim.onPacketTest`.
+const SUPPORTED = 1;
+const NOT_SUPPORTED = 2;
+const SKIP = 3;
+
+/**
+ * This object provides an abstraction layer over all of our backwards
+ * compatibility, feature detection, and shimming with regards to the remote
+ * debugging prototcol.
+ *
+ * @param aFeatures Array
+ *        An array of FeatureCompatibilityShim objects
+ */
+function ProtocolCompatibility(aClient, aFeatures) {
+  this._client = aClient;
+  this._featuresWithUnknownSupport = new Set(aFeatures);
+  this._featuresWithoutSupport = new Set();
+
+  this._featureDeferreds = Object.create(null)
+  for (let f of aFeatures) {
+    this._featureDeferreds[f.name] = defer();
+  }
+}
+
+ProtocolCompatibility.prototype = {
+  /**
+   * Returns a promise that resolves to true if the RDP supports the feature,
+   * and is rejected otherwise.
+   *
+   * @param aFeatureName String
+   *        The name of the feature we are testing.
+   */
+  supportsFeature: function PC_supportsFeature(aFeatureName) {
+    return this._featureDeferreds[aFeatureName].promise;
+  },
+
+  /**
+   * Force a feature to be considered unsupported.
+   *
+   * @param aFeatureName String
+   *        The name of the feature we are testing.
+   */
+  rejectFeature: function PC_rejectFeature(aFeatureName) {
+    this._featureDeferreds[aFeatureName].reject(false);
+  },
+
+  /**
+   * Called for each packet received over the RDP from the server. Tests for
+   * protocol features and shims packets to support needed features.
+   *
+   * @param aPacket Object
+   *        Packet received over the RDP from the server.
+   */
+  onPacket: function PC_onPacket(aPacket) {
+    this._detectFeatures(aPacket);
+    return this._shimPacket(aPacket);
+  },
+
+  /**
+   * For each of the features we don't know whether the server supports or not,
+   * attempt to detect support based on the packet we just received.
+   */
+  _detectFeatures: function PC__detectFeatures(aPacket) {
+    for (let feature of this._featuresWithUnknownSupport) {
+      try {
+        switch (feature.onPacketTest(aPacket)) {
+        case SKIP:
+          break;
+        case SUPPORTED:
+          this._featuresWithUnknownSupport.delete(feature);
+          this._featureDeferreds[feature.name].resolve(true);
+          break;
+        case NOT_SUPPORTED:
+          this._featuresWithUnknownSupport.delete(feature);
+          this._featuresWithoutSupport.add(feature);
+          this.rejectFeature(feature.name);
+          break;
+        default:
+          Cu.reportError(new Error(
+            "Bad return value from `onPacketTest` for feature '"
+              + feature.name + "'"));
+        }
+      } catch (ex) {
+        Cu.reportError("Error detecting support for feature '"
+                       + feature.name + "':" + ex.message + "\n"
+                       + ex.stack);
+      }
+    }
+  },
+
+  /**
+   * Go through each of the features that we know are unsupported by the current
+   * server and attempt to shim support.
+   */
+  _shimPacket: function PC__shimPacket(aPacket) {
+    let extraPackets = [];
+
+    let loop = function (aFeatures, aPacket) {
+      if (aFeatures.length === 0) {
+        for (let packet of extraPackets) {
+          this._client.onPacket(packet, true);
+        }
+        return aPacket;
+      } else {
+        let replacePacket = function (aNewPacket) {
+          return aNewPacket;
+        };
+        let extraPacket = function (aExtraPacket) {
+          extraPackets.push(aExtraPacket);
+          return aPacket;
+        };
+        let keepPacket = function () {
+          return aPacket;
+        };
+        let newPacket = aFeatures[0].translatePacket(aPacket,
+                                                     replacePacket,
+                                                     extraPacket,
+                                                     keepPacket);
+        return resolve(newPacket).then(loop.bind(null, aFeatures.slice(1)));
+      }
+    }.bind(this);
+
+    return loop([f for (f of this._featuresWithoutSupport)],
+                aPacket);
+  }
+};
+
+/**
+ * Interface defining what methods a feature compatibility shim should have.
+ */
+const FeatureCompatibilityShim = {
+  // The name of the feature
+  name: null,
+
+  /**
+   * Takes a packet and returns boolean (or promise of boolean) indicating
+   * whether the server supports the RDP feature we are possibly shimming.
+   */
+  onPacketTest: function (aPacket) {
+    throw new Error("Not yet implemented");
+  },
+
+  /**
+   * Takes a packet actually sent from the server and decides whether to replace
+   * it with a new packet, create an extra packet, or keep it.
+   */
+  translatePacket: function (aPacket, aReplacePacket, aExtraPacket, aKeepPacket) {
+    throw new Error("Not yet implemented");
+  }
+};
+
+/**
+ * A shim to support the "sources" and "newSource" packets for older servers
+ * which don't support them.
+ */
+function SourcesShim() {
+  this._sourcesSeen = new Set();
+}
+
+SourcesShim.prototype = Object.create(FeatureCompatibilityShim);
+let SSProto = SourcesShim.prototype;
+
+SSProto.name = "sources";
+
+SSProto.onPacketTest = function SS_onPacketTest(aPacket) {
+  if (aPacket.traits) {
+    return aPacket.traits.sources
+      ? SUPPORTED
+      : NOT_SUPPORTED;
+  }
+  return SKIP;
+};
+
+SSProto.translatePacket = function SS_translatePacket(aPacket,
+                                                      aReplacePacket,
+                                                      aExtraPacket,
+                                                      aKeepPacket) {
+  if (aPacket.type !== "newScript" || this._sourcesSeen.has(aPacket.url)) {
+    return aKeepPacket();
+  }
+  this._sourcesSeen.add(aPacket.url);
+  return aExtraPacket({
+    from: aPacket.from,
+    type: "newSource",
+    source: aPacket.source
+  });
+};
 
 /**
  * Creates a tab client for the remote debugging protocol server. This client
@@ -494,7 +747,7 @@ TabClient.prototype = {
    */
   detach: function TabC_detach(aOnResponse) {
     let self = this;
-    let packet = { to: this._actor, type: DebugProtocolTypes.detach };
+    let packet = { to: this._actor, type: "detach" };
     this._client.request(packet, function(aResponse) {
       if (self.activeTab === self._client._tabClients[self._actor]) {
         delete self.activeTab;
@@ -524,6 +777,8 @@ function ThreadClient(aClient, aActor) {
   this._actor = aActor;
   this._frameCache = [];
   this._scriptCache = {};
+  this._pauseGrips = {};
+  this._threadGrips = {};
 }
 
 ThreadClient.prototype = {
@@ -531,12 +786,16 @@ ThreadClient.prototype = {
   get state() { return this._state; },
   get paused() { return this._state === "paused"; },
 
+  _pauseOnExceptions: false,
+
   _actor: null,
   get actor() { return this._actor; },
 
+  get compat() { return this._client.compat; },
+
   _assertPaused: function TC_assertPaused(aCommand) {
     if (!this.paused) {
-      throw aCommand + " command sent while not paused.";
+      throw Error(aCommand + " command sent while not paused.");
     }
   },
 
@@ -558,8 +817,12 @@ ThreadClient.prototype = {
     this._state = "resuming";
 
     let self = this;
-    let packet = { to: this._actor, type: DebugProtocolTypes.resume,
-                   resumeLimit: aLimit };
+    let packet = {
+      to: this._actor,
+      type: "resume",
+      resumeLimit: aLimit,
+      pauseOnExceptions: this._pauseOnExceptions
+    };
     this._client.request(packet, function(aResponse) {
       if (aResponse.error) {
         // There was an error resuming, back to paused state.
@@ -608,7 +871,7 @@ ThreadClient.prototype = {
    *        Called with the response packet.
    */
   interrupt: function TC_interrupt(aOnResponse) {
-    let packet = { to: this._actor, type: DebugProtocolTypes.interrupt };
+    let packet = { to: this._actor, type: "interrupt" };
     this._client.request(packet, function(aResponse) {
       if (aOnResponse) {
         aOnResponse(aResponse);
@@ -617,8 +880,41 @@ ThreadClient.prototype = {
   },
 
   /**
+   * Enable or disable pausing when an exception is thrown.
+   *
+   * @param boolean aFlag
+   *        Enables pausing if true, disables otherwise.
+   * @param function aOnResponse
+   *        Called with the response packet.
+   */
+  pauseOnExceptions: function TC_pauseOnExceptions(aFlag, aOnResponse) {
+    this._pauseOnExceptions = aFlag;
+    // If the debuggee is paused, the value of the flag will be communicated in
+    // the next resumption. Otherwise we have to force a pause in order to send
+    // the flag.
+    if (!this.paused) {
+      this.interrupt(function(aResponse) {
+        if (aResponse.error) {
+          // Can't continue if pausing failed.
+          aOnResponse(aResponse);
+          return;
+        }
+        this.resume(aOnResponse);
+      }.bind(this));
+    }
+  },
+
+  /**
    * Send a clientEvaluate packet to the debuggee. Response
    * will be a resume packet.
+   *
+   * @param string aFrame
+   *        The actor ID of the frame where the evaluation should take place.
+   * @param string aExpression
+   *        The expression that will be evaluated in the scope of the frame
+   *        above.
+   * @param function aOnResponse
+   *        Called with the response packet.
    */
   eval: function TC_eval(aFrame, aExpression, aOnResponse) {
     this._assertPaused("eval");
@@ -628,7 +924,7 @@ ThreadClient.prototype = {
     this._state = "resuming";
 
     let self = this;
-    let request = { to: this._actor, type: DebugProtocolTypes.clientEvaluate,
+    let request = { to: this._actor, type: "clientEvaluate",
                     frame: aFrame, expression: aExpression };
     this._client.request(request, function(aResponse) {
       if (aResponse.error) {
@@ -650,7 +946,7 @@ ThreadClient.prototype = {
    */
   detach: function TC_detach(aOnResponse) {
     let self = this;
-    let packet = { to: this._actor, type: DebugProtocolTypes.detach };
+    let packet = { to: this._actor, type: "detach" };
     this._client.request(packet, function(aResponse) {
       if (self.activeThread === self._client._threadClients[self._actor]) {
         delete self.activeThread;
@@ -665,35 +961,29 @@ ThreadClient.prototype = {
   /**
    * Request to set a breakpoint in the specified location.
    *
-   * @param aLocation object
+   * @param object aLocation
    *        The source location object where the breakpoint will be set.
-   * @param aOnResponse integer
+   * @param function aOnResponse
    *        Called with the thread's response.
    */
   setBreakpoint: function TC_setBreakpoint(aLocation, aOnResponse) {
     // A helper function that sets the breakpoint.
     let doSetBreakpoint = function _doSetBreakpoint(aCallback) {
-      let packet = { to: this._actor, type: DebugProtocolTypes.setBreakpoint,
+      let packet = { to: this._actor, type: "setBreakpoint",
                      location: aLocation };
       this._client.request(packet, function (aResponse) {
-          if (aOnResponse) {
-            if (aResponse.error) {
-              if (aCallback) {
-                aCallback(aOnResponse.bind(undefined, aResponse));
-              } else {
-                aOnResponse(aResponse);
-              }
-              return;
-            }
-            let bpClient = new BreakpointClient(this._client, aResponse.actor,
-                                                aLocation);
-            if (aCallback) {
-              aCallback(aOnResponse(aResponse, bpClient));
-            } else {
-              aOnResponse(aResponse, bpClient);
-            }
+        // Ignoring errors, since the user may be setting a breakpoint in a
+        // dead script that will reappear on a page reload.
+        if (aOnResponse) {
+          let bpClient = new BreakpointClient(this._client, aResponse.actor,
+                                              aLocation);
+          if (aCallback) {
+            aCallback(aOnResponse(aResponse, bpClient));
+          } else {
+            aOnResponse(aResponse, bpClient);
           }
-        }.bind(this));
+        }
+      }.bind(this));
     }.bind(this);
 
     // If the debuggee is paused, just set the breakpoint.
@@ -713,42 +1003,100 @@ ThreadClient.prototype = {
   },
 
   /**
-   * Request the loaded scripts for the current thread.
+   * Release multiple thread-lifetime object actors. If any pause-lifetime
+   * actors are included in the request, a |notReleasable| error will return,
+   * but all the thread-lifetime ones will have been released.
    *
-   * @param aOnResponse integer
-   *        Called with the thread's response.
+   * @param array aActors
+   *        An array with actor IDs to release.
    */
-  getScripts: function TC_getScripts(aOnResponse) {
-    let packet = { to: this._actor, type: DebugProtocolTypes.scripts };
+  releaseMany: function TC_releaseMany(aActors, aOnResponse) {
+    let packet = {
+      to: this._actor,
+      type: "releaseMany",
+      actors: aActors
+    };
     this._client.request(packet, aOnResponse);
   },
 
   /**
-   * A cache of source scripts. Clients can observe the scriptsadded and
-   * scriptscleared event to keep up to date on changes to this cache,
-   * and can fill it using the fillScripts method.
+   * Promote multiple pause-lifetime object actors to thread-lifetime ones.
+   *
+   * @param array aActors
+   *        An array with actor IDs to promote.
    */
-  get cachedScripts() { return this._scriptCache; },
+  threadGrips: function TC_threadGrips(aActors, aOnResponse) {
+    let packet = {
+      to: this._actor,
+      type: "threadGrips",
+      actors: aActors
+    };
+    this._client.request(packet, aOnResponse);
+  },
 
   /**
-   * Ensure that source scripts have been loaded in the
-   * ThreadClient's source script cache. A scriptsadded event will be
-   * sent when the source script cache is updated.
+   * Request the loaded sources for the current thread.
    *
-   * @returns true if a scriptsadded notification should be expected.
+   * @param aOnResponse Function
+   *        Called with the thread's response.
    */
-  fillScripts: function TC_fillScripts() {
-    let self = this;
-    this.getScripts(function(aResponse) {
-      for each (let script in aResponse.scripts) {
-        self._scriptCache[script.url] = script;
-      }
-      // If the cache was modified, notify listeners.
-      if (aResponse.scripts && aResponse.scripts.length) {
-        self.notify("scriptsadded");
-      }
+  getSources: function TC_getSources(aOnResponse) {
+    // This is how we should get sources if the server supports "sources"
+    // requests.
+    function getSources(aOnResponse) {
+      let packet = { to: this._actor, type: "sources" };
+      this._client.request(packet, aOnResponse);
+    }
+
+    // This is how we should deduct what sources exist from the existing scripts
+    // when the server does not support "sources" requests.
+    function getSourcesBackwardsCompat(aOnResponse) {
+      this._client.request({
+        to: this._actor,
+        type: "scripts"
+      }, function (aResponse) {
+        if (aResponse.error) {
+          aOnResponse(aResponse);
+          return;
+        }
+        let sourceActorsByURL = aResponse.scripts.reduce(function (aSourceActorsByURL, aScript) {
+          aSourceActorsByURL[aScript.url] = aScript.source;
+          return aSourceActorsByURL;
+        }, {});
+        aOnResponse({
+          sources: [
+            { url: url, actor: sourceActorsByURL[url] }
+            for (url of Object.keys(sourceActorsByURL))
+          ]
+        });
+      });
+    }
+
+    // On the first time `getSources` is called, patch the thread client with
+    // the best method for the server's capabilities.
+    let threadClient = this;
+    this.compat.supportsFeature("sources").then(function () {
+      threadClient.getSources = getSources;
+    }, function () {
+      threadClient.getSources = getSourcesBackwardsCompat;
+    }).then(function () {
+      threadClient.getSources(aOnResponse);
     });
-    return true;
+  },
+
+  _doInterrupted: function TC_doInterrupted(aAction, aError) {
+    if (this.paused) {
+      aAction();
+      return;
+    }
+    this.interrupt(function(aResponse) {
+      if (aResponse) {
+        aError(aResponse);
+        return;
+      }
+      aAction();
+      this.resume(function() {});
+    }.bind(this));
   },
 
   /**
@@ -777,7 +1125,7 @@ ThreadClient.prototype = {
   getFrames: function TC_getFrames(aStart, aCount, aOnResponse) {
     this._assertPaused("frames");
 
-    let packet = { to: this._actor, type: DebugProtocolTypes.frames,
+    let packet = { to: this._actor, type: "frames",
                    start: aStart, count: aCount ? aCount : undefined };
     this._client.request(packet, aOnResponse);
   },
@@ -847,10 +1195,6 @@ ThreadClient.prototype = {
    *        A pause-lifetime object grip returned by the protocol.
    */
   pauseGrip: function TC_pauseGrip(aGrip) {
-    if (!this._pauseGrips) {
-      this._pauseGrips = {};
-    }
-
     if (aGrip.actor in this._pauseGrips) {
       return this._pauseGrips[aGrip.actor];
     }
@@ -861,14 +1205,74 @@ ThreadClient.prototype = {
   },
 
   /**
+   * Get or create a long string client, checking the grip client cache if it
+   * already exists.
+   *
+   * @param aGrip Object
+   *        The long string grip returned by the protocol.
+   * @param aGripCacheName String
+   *        The property name of the grip client cache to check for existing
+   *        clients in.
+   */
+  _longString: function TC__longString(aGrip, aGripCacheName) {
+    if (aGrip.actor in this[aGripCacheName]) {
+      return this[aGripCacheName][aGrip.actor];
+    }
+
+    let client = new LongStringClient(this._client, aGrip);
+    this[aGripCacheName][aGrip.actor] = client;
+    return client;
+  },
+
+  /**
+   * Return an instance of LongStringClient for the given long string grip that
+   * is scoped to the current pause.
+   *
+   * @param aGrip Object
+   *        The long string grip returned by the protocol.
+   */
+  pauseLongString: function TC_pauseLongString(aGrip) {
+    return this._longString(aGrip, "_pauseGrips");
+  },
+
+  /**
+   * Return an instance of LongStringClient for the given long string grip that
+   * is scoped to the thread lifetime.
+   *
+   * @param aGrip Object
+   *        The long string grip returned by the protocol.
+   */
+  threadLongString: function TC_threadLongString(aGrip) {
+    return this._longString(aGrip, "_threadGrips");
+  },
+
+  /**
+   * Clear and invalidate all the grip clients from the given cache.
+   *
+   * @param aGripCacheName
+   *        The property name of the grip cache we want to clear.
+   */
+  _clearGripClients: function TC_clearGrips(aGripCacheName) {
+    for each (let grip in this[aGripCacheName]) {
+      grip.valid = false;
+    }
+    this[aGripCacheName] = {};
+  },
+
+  /**
    * Invalidate pause-lifetime grip clients and clear the list of
    * current grip clients.
    */
-  _clearPauseGrips: function TC_clearPauseGrips(aPacket) {
-    for each (let grip in this._pauseGrips) {
-      grip.valid = false;
-    }
-    this._pauseGrips = null;
+  _clearPauseGrips: function TC_clearPauseGrips() {
+    this._clearGripClients("_pauseGrips");
+  },
+
+  /**
+   * Invalidate pause-lifetime grip clients and clear the list of
+   * current grip clients.
+   */
+  _clearThreadGrips: function TC_clearPauseGrips() {
+    this._clearGripClients("_threadGrips");
   },
 
   /**
@@ -879,8 +1283,17 @@ ThreadClient.prototype = {
     this._state = ThreadStateTypes[aPacket.type];
     this._clearFrames();
     this._clearPauseGrips();
+    aPacket.type === ThreadStateTypes.detached && this._clearThreadGrips();
     this._client._eventsEnabled && this.notify(aPacket.type, aPacket);
   },
+
+  /**
+   * Return an instance of SourceClient for the given source actor form.
+   */
+  source: function TC_source(aForm) {
+    return new SourceClient(this._client, aForm);
+  }
+
 };
 
 eventSource(ThreadClient.prototype);
@@ -902,22 +1315,22 @@ function GripClient(aClient, aGrip)
 GripClient.prototype = {
   get actor() { return this._grip.actor },
 
-  _valid: true,
-  get valid() { return this._valid; },
-  set valid(aValid) { this._valid = !!aValid; },
+  valid: true,
 
   /**
-   * Request the name of the function and its formal parameters.
+   * Request the names of a function's formal parameters.
    *
    * @param aOnResponse function
-   *        Called with the request's response.
+   *        Called with an object of the form:
+   *        { parameterNames:[<parameterName>, ...] }
+   *        where each <parameterName> is the name of a parameter.
    */
-  getSignature: function GC_getSignature(aOnResponse) {
+  getParameterNames: function GC_getParameterNames(aOnResponse) {
     if (this._grip["class"] !== "Function") {
-      throw "getSignature is only valid for function grips.";
+      throw "getParameterNames is only valid for function grips.";
     }
 
-    let packet = { to: this.actor, type: DebugProtocolTypes.nameAndParameters };
+    let packet = { to: this.actor, type: "parameterNames" };
     this._client.request(packet, function (aResponse) {
                                    if (aOnResponse) {
                                      aOnResponse(aResponse);
@@ -932,7 +1345,7 @@ GripClient.prototype = {
    * @param aOnResponse function Called with the request's response.
    */
   getOwnPropertyNames: function GC_getOwnPropertyNames(aOnResponse) {
-    let packet = { to: this.actor, type: DebugProtocolTypes.ownPropertyNames };
+    let packet = { to: this.actor, type: "ownPropertyNames" };
     this._client.request(packet, function (aResponse) {
                                    if (aOnResponse) {
                                      aOnResponse(aResponse);
@@ -947,7 +1360,7 @@ GripClient.prototype = {
    */
   getPrototypeAndProperties: function GC_getPrototypeAndProperties(aOnResponse) {
     let packet = { to: this.actor,
-                   type: DebugProtocolTypes.prototypeAndProperties };
+                   type: "prototypeAndProperties" };
     this._client.request(packet, function (aResponse) {
                                    if (aOnResponse) {
                                      aOnResponse(aResponse);
@@ -962,7 +1375,7 @@ GripClient.prototype = {
    * @param aOnResponse function Called with the request's response.
    */
   getProperty: function GC_getProperty(aName, aOnResponse) {
-    let packet = { to: this.actor, type: DebugProtocolTypes.property,
+    let packet = { to: this.actor, type: "property",
                    name: aName };
     this._client.request(packet, function (aResponse) {
                                    if (aOnResponse) {
@@ -977,12 +1390,101 @@ GripClient.prototype = {
    * @param aOnResponse function Called with the request's response.
    */
   getPrototype: function GC_getPrototype(aOnResponse) {
-    let packet = { to: this.actor, type: DebugProtocolTypes.prototype };
+    let packet = { to: this.actor, type: "prototype" };
     this._client.request(packet, function (aResponse) {
                                    if (aOnResponse) {
                                      aOnResponse(aResponse);
                                    }
                                  });
+  }
+};
+
+/**
+ * A LongStringClient provides a way to access "very long" strings from the
+ * debugger server.
+ *
+ * @param aClient DebuggerClient
+ *        The debugger client parent.
+ * @param aGrip Object
+ *        A pause-lifetime long string grip returned by the protocol.
+ */
+function LongStringClient(aClient, aGrip) {
+  this._grip = aGrip;
+  this._client = aClient;
+}
+
+LongStringClient.prototype = {
+  get actor() { return this._grip.actor; },
+  get length() { return this._grip.length; },
+  get initial() { return this._grip.initial; },
+
+  valid: true,
+
+  /**
+   * Get the substring of this LongString from aStart to aEnd.
+   *
+   * @param aStart Number
+   *        The starting index.
+   * @param aEnd Number
+   *        The ending index.
+   * @param aCallback Function
+   *        The function called when we receive the substring.
+   */
+  substring: function LSC_substring(aStart, aEnd, aCallback) {
+    let packet = { to: this.actor,
+                   type: "substring",
+                   start: aStart,
+                   end: aEnd };
+    this._client.request(packet, aCallback);
+  }
+};
+
+/**
+ * A SourceClient provides a way to access the source text of a script.
+ *
+ * @param aClient DebuggerClient
+ *        The debugger client parent.
+ * @param aForm Object
+ *        The form sent across the remote debugging protocol.
+ */
+function SourceClient(aClient, aForm) {
+  this._form = aForm;
+  this._client = aClient;
+}
+
+SourceClient.prototype = {
+  /**
+   * Get a long string grip for this SourceClient's source.
+   */
+  source: function SC_source(aCallback) {
+    let packet = {
+      to: this._form.actor,
+      type: "source"
+    };
+    this._client.request(packet, function (aResponse) {
+      if (aResponse.error) {
+        aCallback(aResponse);
+        return;
+      }
+
+      if (typeof aResponse.source === "string") {
+        aCallback(aResponse);
+        return;
+      }
+
+      let longString = this._client.activeThread.threadLongString(
+        aResponse.source);
+      longString.substring(0, longString.length, function (aResponse) {
+        if (aResponse.error) {
+          aCallback(aResponse);
+          return;
+        }
+
+        aCallback({
+          source: aResponse.substring
+        });
+      });
+    }.bind(this));
   }
 };
 
@@ -1012,7 +1514,7 @@ BreakpointClient.prototype = {
    * Remove the breakpoint from the server.
    */
   remove: function BC_remove(aOnResponse) {
-    let packet = { to: this._actor, type: DebugProtocolTypes["delete"] };
+    let packet = { to: this._actor, type: "delete" };
     this._client.request(packet, function(aResponse) {
                                    if (aOnResponse) {
                                      aOnResponse(aResponse);
@@ -1031,10 +1533,17 @@ eventSource(BreakpointClient.prototype);
  * @param aPort number
  *        The port number of the debugger server.
  */
-function debuggerSocketConnect(aHost, aPort)
+this.debuggerSocketConnect = function debuggerSocketConnect(aHost, aPort)
 {
   let s = socketTransportService.createTransport(null, 0, aHost, aPort, null);
   let transport = new DebuggerTransport(s.openInputStream(0, 0, 0),
                                         s.openOutputStream(0, 0, 0));
   return transport;
+}
+
+/**
+ * Takes a pair of items and returns them as an array.
+ */
+function pair(aItemOne, aItemTwo) {
+  return [aItemOne, aItemTwo];
 }

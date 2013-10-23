@@ -1,44 +1,31 @@
-/* ***** BEGIN LICENSE BLOCK *****
- * Version: MPL 1.1/GPL 2.0/LGPL 2.1
- *
- * The contents of this file are subject to the Mozilla Public License Version
- * 1.1 (the "License"); you may not use this file except in compliance with
- * the License. You may obtain a copy of the License at
- * http://www.mozilla.org/MPL/
- *
- * Software distributed under the License is distributed on an "AS IS" basis,
- * WITHOUT WARRANTY OF ANY KIND, either express or implied. See the License
- * for the specific language governing rights and limitations under the
- * License.
- *
- * The Original Code is mozilla.org Code.
- *
- * The Initial Developer of the Original Code is
- * Dao Gottwald <dao@mozilla.com>.
- * Portions created by the Initial Developer are Copyright (C) 2009
- * the Initial Developer. All Rights Reserved.
- *
- * Contributor(s):
- *
- * Alternatively, the contents of this file may be used under the terms of
- * either the GNU General Public License Version 2 or later (the "GPL"), or
- * the GNU Lesser General Public License Version 2.1 or later (the "LGPL"),
- * in which case the provisions of the GPL or the LGPL are applicable instead
- * of those above. If you wish to allow use of your version of this file only
- * under the terms of either the GPL or the LGPL, and not to allow others to
- * use your version of this file under the terms of the MPL, indicate your
- * decision by deleting the provisions above and replace them with the notice
- * and other provisions required by the GPL or the LGPL. If you do not delete
- * the provisions above, a recipient may use your version of this file under
- * the terms of any one of the MPL, the GPL or the LGPL.
- *
- * ***** END LICENSE BLOCK ***** */
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-let EXPORTED_SYMBOLS = ["LightweightThemeConsumer"];
+this.EXPORTED_SYMBOLS = ["LightweightThemeConsumer"];
 
-function LightweightThemeConsumer(aDocument) {
+Components.utils.import("resource://gre/modules/XPCOMUtils.jsm");
+
+XPCOMUtils.defineLazyModuleGetter(this, "LightweightThemeImageOptimizer",
+  "resource://gre/modules/LightweightThemeImageOptimizer.jsm");
+
+XPCOMUtils.defineLazyModuleGetter(this, "PrivateBrowsingUtils",
+  "resource://gre/modules/PrivateBrowsingUtils.jsm");
+
+this.LightweightThemeConsumer =
+ function LightweightThemeConsumer(aDocument) {
   this._doc = aDocument;
+  this._win = aDocument.defaultView;
   this._footerId = aDocument.documentElement.getAttribute("lightweightthemesfooter");
+
+  if (PrivateBrowsingUtils.isWindowPrivate(this._win) &&
+      !PrivateBrowsingUtils.permanentPrivateBrowsing) {
+    return;
+  }
+
+  let screen = this._win.screen;
+  this._lastScreenWidth = screen.width;
+  this._lastScreenHeight = screen.height;
 
   Components.classes["@mozilla.org/observer-service;1"]
             .getService(Components.interfaces.nsIObserverService)
@@ -47,9 +34,14 @@ function LightweightThemeConsumer(aDocument) {
   var temp = {};
   Components.utils.import("resource://gre/modules/LightweightThemeManager.jsm", temp);
   this._update(temp.LightweightThemeManager.currentThemeForDisplay);
+  this._win.addEventListener("resize", this);
 }
 
 LightweightThemeConsumer.prototype = {
+  _lastData: null,
+  _lastScreenWidth: null,
+  _lastScreenHeight: null,
+
   observe: function (aSubject, aTopic, aData) {
     if (aTopic != "lightweight-theme-styling-update")
       return;
@@ -57,17 +49,35 @@ LightweightThemeConsumer.prototype = {
     this._update(JSON.parse(aData));
   },
 
-  destroy: function () {
-    Components.classes["@mozilla.org/observer-service;1"]
-              .getService(Components.interfaces.nsIObserverService)
-              .removeObserver(this, "lightweight-theme-styling-update");
+  handleEvent: function (aEvent) {
+    let {width, height} = this._win.screen;
 
-    this._doc = null;
+    if (this._lastScreenWidth != width || this._lastScreenHeight != height) {
+      this._lastScreenWidth = width;
+      this._lastScreenHeight = height;
+      this._update(this._lastData);
+    }
+  },
+
+  destroy: function () {
+    if (!PrivateBrowsingUtils.isWindowPrivate(this._win) ||
+        PrivateBrowsingUtils.permanentPrivateBrowsing) {
+      Components.classes["@mozilla.org/observer-service;1"]
+                .getService(Components.interfaces.nsIObserverService)
+                .removeObserver(this, "lightweight-theme-styling-update");
+
+      this._win.removeEventListener("resize", this);
+    }
+
+    this._win = this._doc = null;
   },
 
   _update: function (aData) {
     if (!aData)
       aData = { headerURL: "", footerURL: "", textcolor: "", accentcolor: "" };
+
+    this._lastData = aData;
+    aData = LightweightThemeImageOptimizer.optimize(aData, this._win.screen);
 
     var root = this._doc.documentElement;
     var active = !!aData.headerURL;
@@ -97,6 +107,7 @@ LightweightThemeConsumer.prototype = {
         footer.removeAttribute("lwthemefooter");
     }
 
+//@line 116 "c:\trees\official1.7\toolkit\content\LightweightThemeConsumer.jsm"
   }
 }
 

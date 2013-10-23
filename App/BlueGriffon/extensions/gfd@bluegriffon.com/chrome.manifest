@@ -1,0 +1,4 @@
+skin gfd classic/1.0 jar:chrome.jar!/gfd/skin/classic/gfd/
+content gfd jar:chrome.jar!/gfd/content/gfd/
+locale gfd en-US jar:chrome.jar!/gfd-en-US/locale/en-US/gfd/
+overlay chrome://bluegriffon/content/xul/bluegriffon.xul chrome://gfd/content/gfdOverlay.xul

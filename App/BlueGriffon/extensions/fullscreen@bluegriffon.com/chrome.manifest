@@ -1,0 +1,5 @@
+skin fullscreen classic/1.0 jar:chrome.jar!/fullscreen/skin/
+style chrome://bluegriffon/content/xul/bluegriffon.xul chrome://fullscreen/skin/fullscreenOverlay.css
+overlay chrome://bluegriffon/content/xul/bluegriffon.xul chrome://fullscreen/content/fullscreenOverlay.xul
+content fullscreen jar:chrome.jar!/fullscreen/content/
+locale fullscreen en-US jar:chrome.jar!/fullscreen-locale/locale/en-US/

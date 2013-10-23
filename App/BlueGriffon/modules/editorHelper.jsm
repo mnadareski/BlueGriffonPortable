@@ -86,6 +86,12 @@ var EditorUtils = {
     return null;
   },  
 
+  getCurrentViewMode: function getCurrentViewMode()
+  {
+    return this.getCurrentEditorElement().parentNode.getAttribute("currentmode") ||
+           "wysiwyg";
+  },
+
   getCurrentSourceEditorElement: function()
   {
     var editorElement = this.getCurrentEditorElement();
@@ -95,12 +101,23 @@ var EditorUtils = {
     return null;
   },
 
+  getCurrentSourceWindow: function()
+  {
+    var editorElement = this.getCurrentEditorElement();
+    if (editorElement) {
+      var bespinIframe = editorElement.previousSibling;
+      var bespinWindow = bespinIframe.contentWindow.wrappedJSObject;
+      return bespinWindow;
+    }
+    return null;
+  },
+
   getCurrentSourceEditor: function()
   {
     var editorElement = this.getCurrentEditorElement();
     if (editorElement) {
       var bespinIframe = editorElement.previousSibling;
-      var bespinEditor = bespinIframe.contentWindow.gEditor;
+      var bespinEditor = bespinIframe.contentWindow.wrappedJSObject.gEditor;
       return bespinEditor;
     }
     return null;
@@ -209,7 +226,10 @@ var EditorUtils = {
   isDocumentModified: function isDocumentModified()
   {
     try {
-      return this.getCurrentEditor().documentModified;
+      if (this.getCurrentEditor().documentModified)
+        return true;
+      if (this.getCurrentSourceWindow().GetModificationCount())
+        return true;
     } catch (e) { }
     return false;
   },
@@ -529,25 +549,41 @@ var EditorUtils = {
     return (mimetype == "application/xhtml+xml");
   },
 
+  isPolyglotHtml5: function()
+  {
+    var doc = this.getCurrentDocument();
+    var doctype = doc.doctype;
+    var systemId = doctype ? doc.doctype.systemId : null;
+    var isXML = (doc.documentElement.getAttribute("xmlns") == "http://www.w3.org/1999/xhtml");
+    return (systemId == ""
+            && isXML
+            && !this.getCurrentDocument().hasXMLDeclaration);
+    
+  },
+
   getCurrentDocumentMimeType: function()
   {
     var doc = this.getCurrentDocument();
-    var editorMimeType = doc.contentType;
     var doctype = doc.doctype;
     var systemId = doctype ? doc.doctype.systemId : null;
     var isXML = false;
     switch (systemId) {
       case "http://www.w3.org/TR/html4/strict.dtd": // HTML 4
       case "http://www.w3.org/TR/html4/loose.dtd":
-      case null:
+      case "http://www.w3.org/TR/REC-html40/strict.dtd":
+      case "http://www.w3.org/TR/REC-html40/loose.dtd":
         isXML = false;
         break;
       case "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd": // XHTML 1
       case "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd":
+      case "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd":
         isXML = true;
         break;
       case "":
         isXML = (doc.documentElement.getAttribute("xmlns") == "http://www.w3.org/1999/xhtml");
+        break;
+      case null:
+        isXML = (doc.compatMode == "CSS1Compat");
         break;
       default: break; // should never happen...
     }
@@ -858,6 +894,57 @@ var EditorUtils = {
 
     return {value: flags, maxColumnPref: maxColumnPref};
 	},
+
+  cleanupBRs: function() {
+    const kNF = Components.interfaces.nsIDOMNodeFilter;
+    const kN  = Components.interfaces.nsIDOMNode;
+
+    function acceptNodeBR(node)
+    {
+      if (node.nodeType == kN.ELEMENT_NODE)
+      {
+        var tagName = node.nodeName.toLowerCase();
+        if (tagName == "br") {
+          var parent = node.parentNode;
+          while (parent 
+                 && parent.ownerDocument.defaultView.getComputedStyle(parent, "").getPropertyValue("display") == "inline") {
+            parent = parent.parentNode;
+          }
+          if (parent
+              && parent.lastChild == node
+              && parent.textContent)
+            return kNF.FILTER_ACCEPT;
+        }
+      }
+      return kNF.FILTER_SKIP;
+    }
+
+    var editor = this.getCurrentEditor();
+    editor.beginTransaction();
+    var theDocument = editor.document;
+    var treeWalker = theDocument.createTreeWalker(theDocument.documentElement,
+                                                  kNF.SHOW_ELEMENT,
+                                                  acceptNodeBR,
+                                                  true);
+    if (treeWalker) {
+      var theNode = treeWalker.nextNode(), tmpNode;
+      while (theNode) {
+        var tagName = theNode.nodeName.toLowerCase();
+        if (tagName == "br") // sanity check
+        {
+          tmpNode = treeWalker.nextNode();
+          editor.deleteNode(theNode);
+
+          theNode = tmpNode;
+        }
+      }
+    }
+    editor.endTransaction();
+  },
+
+  cleanup: function() {
+    this.cleanupBRs();
+  },
 
   get activeViewActive()    { return this.mActiveViewActive; },
   set activeViewActive(val) { this.mActiveViewActive = val; }

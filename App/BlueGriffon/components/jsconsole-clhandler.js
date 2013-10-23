@@ -1,4 +1,10 @@
-//@line 41 "c:\trees\official1.4\toolkit\components\console\jsconsole-clhandler.js"
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+/* vim:sw=4:sr:sta:et:sts: */
+
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
 const Cc = Components.classes;
 const Ci = Components.interfaces;
 Components.utils.import("resource://gre/modules/XPCOMUtils.jsm");
@@ -31,4 +37,4 @@ jsConsoleHandler.prototype = {
   QueryInterface: XPCOMUtils.generateQI([Ci.nsICommandLineHandler]),
 };
 
-var NSGetFactory = XPCOMUtils.generateNSGetFactory([jsConsoleHandler]);
+this.NSGetFactory = XPCOMUtils.generateNSGetFactory([jsConsoleHandler]);

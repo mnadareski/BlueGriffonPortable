@@ -1,43 +1,8 @@
 /* -*- Mode: C++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
 /* vim: set sw=4 ts=4 et lcs=trail\:.,tab\:>~ : */
-/* ***** BEGIN LICENSE BLOCK *****
- * Version: MPL 1.1/GPL 2.0/LGPL 2.1
- *
- * The contents of this file are subject to the Mozilla Public License Version
- * 1.1 (the "License"); you may not use this file except in compliance with
- * the License. You may obtain a copy of the License at
- * http://www.mozilla.org/MPL/
- *
- * Software distributed under the License is distributed on an "AS IS" basis,
- * WITHOUT WARRANTY OF ANY KIND, either express or implied. See the License
- * for the specific language governing rights and limitations under the
- * License.
- *
- * The Original Code is mozilla.org code.
- *
- * The Initial Developer of the Original Code is Mozilla Foundation.
- * Portions created by the Initial Developer are Copyright (C) 2007
- * the Initial Developer. All Rights Reserved.
- *
- * Contributor(s):
- *  Paul O'Shannessy <poshannessy@mozilla.com> (primary author)
- *  Mrinal Kant <mrinal.kant@gmail.com> (original sqlite related changes)
- *  Justin Dolske <dolske@mozilla.com> (encryption/decryption functions are
- *                                     a lift from Justin's storage-Legacy.js)
- *
- * Alternatively, the contents of this file may be used under the terms of
- * either the GNU General Public License Version 2 or later (the "GPL"), or
- * the GNU Lesser General Public License Version 2.1 or later (the "LGPL"),
- * in which case the provisions of the GPL or the LGPL are applicable instead
- * of those above. If you wish to allow use of your version of this file only
- * under the terms of either the GPL or the LGPL, and not to allow others to
- * use your version of this file under the terms of the MPL, indicate your
- * decision by deleting the provisions above and replace them with the notice
- * and other provisions required by the GPL or the LGPL. If you do not delete
- * the provisions above, a recipient may use your version of this file under
- * the terms of any one of the MPL, the GPL or the LGPL.
- *
- * ***** END LICENSE BLOCK ***** */
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 
 const Cc = Components.classes;
@@ -692,7 +657,7 @@ LoginManagerStorage_mozStorage.prototype = {
      *
      */
      storeDeletedLogin : function(aLogin) {
-//@line 711 "c:\trees\official1.4\toolkit\components\passwordmgr\storage-mozStorage.js"
+//@line 676 "c:\trees\official1.7\toolkit\components\passwordmgr\storage-mozStorage.js"
      },
 
 
@@ -711,13 +676,10 @@ LoginManagerStorage_mozStorage.prototype = {
         this._removeOldSignonsFiles();
 
         // Disabled hosts kept, as one presumably doesn't want to erase those.
+        // TODO: Add these items to the deleted items table once we've sorted
+        //       out the issues from bug 756701
         query = "DELETE FROM moz_logins";
         try {
-            let logins = this.getAllLogins();
-            for each (let login in logins) {
-                let [id, storedLogin] = this._getIdForLogin(login);
-                this.storeDeletedLogin(storedLogin);
-            }
             stmt = this._dbCreateStatement(query);
             stmt.execute();
             transaction.commit();
@@ -857,6 +819,14 @@ LoginManagerStorage_mozStorage.prototype = {
      */
     get uiBusy() {
         return this._crypto.uiBusy;
+    },
+
+
+    /*
+     * isLoggedIn
+     */
+    get isLoggedIn() {
+        return this._crypto.isLoggedIn;
     },
 
 
@@ -1704,4 +1674,4 @@ LoginManagerStorage_mozStorage.prototype = {
 }; // end of nsLoginManagerStorage_mozStorage implementation
 
 let component = [LoginManagerStorage_mozStorage];
-var NSGetFactory = XPCOMUtils.generateNSGetFactory(component);
+this.NSGetFactory = XPCOMUtils.generateNSGetFactory(component);

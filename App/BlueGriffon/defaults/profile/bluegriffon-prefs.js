@@ -3,7 +3,7 @@
 pref("toolkit.defaultChromeURI", "chrome://bluegriffon/content/xul/bluegriffon.xul");
 pref("browser.chromeURL", "chrome://bluegriffon/content/xul/bluegriffon.xul");
 pref("browser.hiddenWindowChromeURL", "chrome://bluegriffon/content/xul/hiddenWindow.xul");
-pref("toolkit.singletonWindowType", "hidden-main");
+pref("toolkit.singletonWindowType", "bluegriffon");
 pref("bluegriffon.singletonWindowType", "bluegriffon");
 
 // mandatory for XULrunner apps
@@ -28,7 +28,7 @@ pref("intl.locale.matchOS", true);
 pref("intl.accept_charsets", "iso-8859-1,*,utf-8");
 pref("browser.display.use_document_fonts", 1);
 
-pref("extensions.update.autoUpdateDefault", true);
+pref("extensions.update.autoUpdateDefault", false);
 pref("extensions.update.enabled", false);
 pref("extensions.update.url", "chrome://mozapps/locale/extensions/extensions.properties");
 pref("extensions.update.interval", 86400);  // Check for updates to Extensions and 
@@ -43,8 +43,10 @@ pref("extensions.closeOnEscape", true);
 pref("extensions.ui.lastCategory", "addons://list/extension");
 pref("extensions.shownSelectionUI", false);
 pref("extensions.showMismatchUI", false);
+pref("extensions.logging.enabled", true);
 
 // browser preferences
+pref("image.animation_mode", "none");
 pref("bluegriffon.display.use_system_colors", true);
 pref("bluegriffon.display.foreground_color", "#000000");
 pref("bluegriffon.display.background_color", "#ffffff");
@@ -75,7 +77,12 @@ pref("bluegriffon.defaults.table.text_wrap", "");
 pref("bluegriffon.defaults.table.cell_spacing", "2");
 pref("bluegriffon.defaults.table.cell_padding", "2");
 
+// file extension preferences
+pref("bluegriffon.defaults.extension.application-xhtml+xml", "xhtml");
+pref("bluegriffon.defaults.extension.text-html", "html");
+
 // CSS policy
+pref("editor.use_css", true);
 pref("bluegriffon.css.policy", "manual");
 pref("bluegriffon.css.prefix", "BG_");
 pref("bluegriffon.css.support.gecko", true);
@@ -122,7 +129,8 @@ pref("bluegriffon.updates.check.enabled", true);
 pref("bluegriffon.updates.frequency", "launch");
 
 pref("html5.enable", true);
-pref("bluegriffon.defaults.doctype", "kXHTML5");
+pref("bluegriffon.defaults.doctype", "kHTML5");
+pref("bluegriffon.defaults.html5.polyglot", false);
 pref("media.autoplay.enabled", false);
 
 pref("bluegriffon.defaults.forceLF", false);
@@ -165,9 +173,59 @@ pref("bluegriffon.css.colors.type", "hex");
 
 pref("tipoftheday.openAtStartup", true);
 
-
-// Enable Floating Toolbar
-pref("bluegriffon.floatingToolbar.enabled", true);
-
 // make links absolute when copied
 pref("clipboard.absoluteLinks", true);
+
+pref("extensions.venkman.enableChromeFilter", false);
+
+// Print header customization
+// Use the following codes:
+// &T - Title
+// &U - Document URL
+// &D - Date/Time
+// &P - Page Number
+// &PT - Page Number "of" Page total
+// Set each header to a string containing zero or one of these codes
+// and the code will be replaced in that string by the corresponding data
+pref("print.print_headerleft", "&T");
+pref("print.print_headercenter", "");
+pref("print.print_headerright", "&U");
+pref("print.print_footerleft", "&PT");
+pref("print.print_footercenter", "");
+pref("print.print_footerright", "&D");
+pref("print.show_print_progress", true);
+
+// When this is set to false each window has its own PrintSettings
+// and a change in one window does not affect the others
+pref("print.use_global_printsettings", true);
+
+// Save the Printings after each print job
+pref("print.save_print_settings", true);
+
+pref("print.whileInPrintPreview", true);
+
+// Cache old Presentation when going into Print Preview
+pref("print.always_cache_old_pres", false);
+
+// Enables you to specify the amount of the paper that is to be treated
+// as unwriteable.  The print_edge_XXX and print_margin_XXX preferences
+// are treated as offsets that are added to this pref.
+// Default is "-1", which means "use the system default".  (If there is
+// no system default, then the -1 is treated as if it were 0.)
+// This is used by both Printing and Print Preview.
+// Units are in 1/100ths of an inch.
+pref("print.print_unwriteable_margin_top",    -1);
+pref("print.print_unwriteable_margin_left",   -1);
+pref("print.print_unwriteable_margin_right",  -1);
+pref("print.print_unwriteable_margin_bottom", -1);
+
+// Enables you to specify the gap from the edge of the paper's 
+// unwriteable area to the margin.
+// This is used by both Printing and Print Preview
+// Units are in 1/100ths of an inch.
+pref("print.print_edge_top", 0);
+pref("print.print_edge_left", 0);
+pref("print.print_edge_right", 0);
+pref("print.print_edge_bottom", 0);
+
+pref("layout.css.flexbox.enabled", true);

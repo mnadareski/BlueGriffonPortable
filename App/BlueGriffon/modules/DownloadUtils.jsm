@@ -1,41 +1,9 @@
 /* vim: sw=2 ts=2 sts=2 expandtab filetype=javascript
- * ***** BEGIN LICENSE BLOCK *****
- * Version: MPL 1.1/GPL 2.0/LGPL 2.1
- *
- * The contents of this file are subject to the Mozilla Public License Version
- * 1.1 (the "License"); you may not use this file except in compliance with
- * the License. You may obtain a copy of the License at
- * http://www.mozilla.org/MPL/
- *
- * Software distributed under the License is distributed on an "AS IS" basis,
- * WITHOUT WARRANTY OF ANY KIND, either express or implied. See the License
- * for the specific language governing rights and limitations under the
- * License.
- *
- * The Original Code is Download Manager Utility Code.
- *
- * The Initial Developer of the Original Code is
- * Edward Lee <edward.lee@engineering.uiuc.edu>.
- * Portions created by the Initial Developer are Copyright (C) 2008
- * the Initial Developer. All Rights Reserved.
- *
- * Contributor(s):
- *
- * Alternatively, the contents of this file may be used under the terms of
- * either the GNU General Public License Version 2 or later (the "GPL"), or
- * the GNU Lesser General Public License Version 2.1 or later (the "LGPL"),
- * in which case the provisions of the GPL or the LGPL are applicable instead
- * of those above. If you wish to allow use of your version of this file only
- * under the terms of either the GPL or the LGPL, and not to allow others to
- * use your version of this file under the terms of the MPL, indicate your
- * decision by deleting the provisions above and replace them with the notice
- * and other provisions required by the GPL or the LGPL. If you do not delete
- * the provisions above, a recipient may use your version of this file under
- * the terms of any one of the MPL, the GPL or the LGPL.
- *
- * ***** END LICENSE BLOCK ***** */
+ * This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-var EXPORTED_SYMBOLS = [ "DownloadUtils" ];
+this.EXPORTED_SYMBOLS = [ "DownloadUtils" ];
 
 /**
  * This module provides the DownloadUtils object which contains useful methods
@@ -71,13 +39,13 @@ const Cc = Components.classes;
 const Ci = Components.interfaces;
 const Cu = Components.utils;
 
-__defineGetter__("PluralForm", function() {
+this.__defineGetter__("PluralForm", function() {
   delete this.PluralForm;
   Cu.import("resource://gre/modules/PluralForm.jsm");
   return PluralForm;
 });
 
-__defineGetter__("gDecimalSymbol", function() {
+this.__defineGetter__("gDecimalSymbol", function() {
   delete this.gDecimalSymbol;
   return this.gDecimalSymbol = Number(5.4).toLocaleString().match(/\D/);
 });
@@ -87,6 +55,7 @@ const kDownloadProperties =
 
 let gStr = {
   statusFormat: "statusFormat3",
+  statusFormatNoRate: "statusFormatNoRate",
   transferSameUnits: "transferSameUnits2",
   transferDiffUnits: "transferDiffUnits2",
   transferNoTotal: "transferNoTotal2",
@@ -105,7 +74,7 @@ let gStr = {
 };
 
 // This lazily initializes the string bundle upon first use.
-__defineGetter__("gBundle", function() {
+this.__defineGetter__("gBundle", function() {
   delete gBundle;
   return this.gBundle = Cc["@mozilla.org/intl/stringbundle;1"].
                         getService(Ci.nsIStringBundleService).
@@ -117,7 +86,7 @@ __defineGetter__("gBundle", function() {
 const kCachedLastMaxSize = 10;
 let gCachedLast = [];
 
-let DownloadUtils = {
+this.DownloadUtils = {
   /**
    * Generate a full status string for a download given its current progress,
    * total size, speed, last time remaining
@@ -135,6 +104,63 @@ let DownloadUtils = {
   getDownloadStatus: function DU_getDownloadStatus(aCurrBytes, aMaxBytes,
                                                    aSpeed, aLastSec)
   {
+    let [transfer, timeLeft, newLast, normalizedSpeed]
+      = this._deriveTransferRate(aCurrBytes, aMaxBytes, aSpeed, aLastSec);
+
+    let [rate, unit] = DownloadUtils.convertByteUnits(normalizedSpeed);
+    let params = [transfer, rate, unit, timeLeft];
+    let status = gBundle.formatStringFromName(gStr.statusFormat, params,
+                                              params.length);
+    return [status, newLast];
+  },
+
+  /**
+   * Generate a status string for a download given its current progress,
+   * total size, speed, last time remaining. The status string contains the
+   * time remaining, as well as the total bytes downloaded. Unlike
+   * getDownloadStatus, it does not include the rate of download.
+   *
+   * @param aCurrBytes
+   *        Number of bytes transferred so far
+   * @param [optional] aMaxBytes
+   *        Total number of bytes or -1 for unknown
+   * @param [optional] aSpeed
+   *        Current transfer rate in bytes/sec or -1 for unknown
+   * @param [optional] aLastSec
+   *        Last time remaining in seconds or Infinity for unknown
+   * @return A pair: [download status text, new value of "last seconds"]
+   */
+  getDownloadStatusNoRate:
+  function DU_getDownloadStatusNoRate(aCurrBytes, aMaxBytes, aSpeed,
+                                      aLastSec)
+  {
+    let [transfer, timeLeft, newLast]
+      = this._deriveTransferRate(aCurrBytes, aMaxBytes, aSpeed, aLastSec);
+
+    let params = [transfer, timeLeft];
+    let status = gBundle.formatStringFromName(gStr.statusFormatNoRate, params,
+                                              params.length);
+    return [status, newLast];
+  },
+
+  /**
+   * Helper function that returns a transfer string, a time remaining string,
+   * and a new value of "last seconds".
+   * @param aCurrBytes
+   *        Number of bytes transferred so far
+   * @param [optional] aMaxBytes
+   *        Total number of bytes or -1 for unknown
+   * @param [optional] aSpeed
+   *        Current transfer rate in bytes/sec or -1 for unknown
+   * @param [optional] aLastSec
+   *        Last time remaining in seconds or Infinity for unknown
+   * @return A triple: [amount transferred string, time remaining string,
+   *                    new value of "last seconds"]
+   */
+  _deriveTransferRate: function DU__deriveTransferRate(aCurrBytes,
+                                                       aMaxBytes, aSpeed,
+                                                       aLastSec)
+  {
     if (aMaxBytes == null)
       aMaxBytes = -1;
     if (aSpeed == null)
@@ -147,13 +173,8 @@ let DownloadUtils = {
       (aMaxBytes - aCurrBytes) / aSpeed : -1;
 
     let transfer = DownloadUtils.getTransferTotal(aCurrBytes, aMaxBytes);
-    let [rate, unit] = DownloadUtils.convertByteUnits(aSpeed);
     let [timeLeft, newLast] = DownloadUtils.getTimeLeft(seconds, aLastSec);
-
-    let params = [transfer, rate, unit, timeLeft];
-    let status = gBundle.formatStringFromName(gStr.statusFormat, params,
-                                              params.length);
-    return [status, newLast];
+    return [transfer, timeLeft, newLast, aSpeed];
   },
 
   /**

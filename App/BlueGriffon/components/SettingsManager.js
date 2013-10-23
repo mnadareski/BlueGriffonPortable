@@ -2,126 +2,36 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-"use strict"
+"use strict";
 
-/* static functions */
-let DEBUG = 0;
-if (DEBUG)
-  debug = function (s) { dump("-*- SettingsManager: " + s + "\n"); }
-else
-  debug = function (s) {}
-
-function Queue() {
-  this._queue = [];
-  this._index = 0;
-}
-
-Queue.prototype = {
-  getLength: function() { return (this._queue.length - this._index); },
-
-  isEmpty: function() { return (this._queue.length == 0); },
-
-  enqueue: function(item) { this._queue.push(item); },
-
-  dequeue: function() {
-    if(this.isEmpty())
-      return undefined;
-
-    var item = this._queue[this._index];
-    if (++this._index * 2 >= this._queue.length){
-      this._queue  = this._queue.slice(this._index);
-      this._index = 0;
-    }
-    return item;
-  }
-}
-
-const DB_NAME = "settings";
-const DB_VERSION = 1;
-const STORE_NAME = "settings";
-
-function SettingsDB() {}
-
-SettingsDB.prototype = {
-
-  db: null,
-
-  close: function close() {
-    if (this.db)
-      this.db.close();
-  },
-
-  /**
-   * Prepare the database. This may include opening the database and upgrading
-   * it to the latest schema version.
-   * 
-   * @return (via callback) a database ready for use.
-   */
-  ensureDB: function ensureDB(aSuccessCb, aFailureCb, aGlobal) {
-    if (this.db) {
-      debug("ensureDB: already have a database, returning early.");
-      return;
-    }
-
-    let self = this;
-    debug("try to open database:" + DB_NAME + " " + DB_VERSION + " " + this.db);
-    let req = aGlobal.mozIndexedDB.open(DB_NAME, DB_VERSION);
-    req.onsuccess = function (event) {
-      debug("Opened database:", DB_NAME, DB_VERSION);
-      self.db = event.target.result;
-      self.db.onversionchange = function(event) {
-        debug("WARNING: DB modified from a different window.");
-      }
-      aSuccessCb();
-    };
-    req.onupgradeneeded = function (aEvent) {
-      debug("Database needs upgrade:" + DB_NAME + aEvent.oldVersion + aEvent.newVersion);
-      debug("Correct new database version:" + aEvent.newVersion == DB_VERSION);
-
-      let db = aEvent.target.result;
-      switch (aEvent.oldVersion) {
-        case 0:
-          debug("New database");
-          self.createSchema(db);
-          break;
-
-        default:
-          debug("No idea what to do with old database version:" + aEvent.oldVersion);
-          aFailureCb(aEvent.target.errorMessage);
-          break;
-      }
-    };
-    req.onerror = function (aEvent) {
-      debug("Failed to open database:", DB_NAME);
-      aFailureCb(aEvent.target.errorMessage);
-    };
-    req.onblocked = function (aEvent) {
-      debug("Opening database request is blocked.");
-    };
-  },
-
-  createSchema: function createSchema(aDb) {
-    let objectStore = aDb.createObjectStore(STORE_NAME, {keyPath: "settingName"});
-    objectStore.createIndex("settingValue", "settingValue", { unique: false });
-    debug("Created object stores and indexes");
-  }
+const DEBUG = false;
+function debug(s) {
+  if (DEBUG) dump("-*- SettingsManager: " + s + "\n");
 }
 
 const Cc = Components.classes;
 const Ci = Components.interfaces;
 const Cu = Components.utils;
 
+Cu.import("resource://gre/modules/SettingsQueue.jsm");
+Cu.import("resource://gre/modules/SettingsDB.jsm");
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 Cu.import("resource://gre/modules/Services.jsm");
+Cu.import("resource://gre/modules/ObjectWrapper.jsm")
+
+XPCOMUtils.defineLazyServiceGetter(this, "cpmm",
+                                   "@mozilla.org/childprocessmessagemanager;1",
+                                   "nsIMessageSender");
 
 const nsIClassInfo            = Ci.nsIClassInfo;
 const SETTINGSLOCK_CONTRACTID = "@mozilla.org/settingsLock;1";
-const SETTINGSLOCK_CID        = Components.ID("{ef95ddd0-6308-11e1-b86c-0800200c9a66}");
+const SETTINGSLOCK_CID        = Components.ID("{60c9357c-3ae0-4222-8f55-da01428470d5}");
 const nsIDOMSettingsLock      = Ci.nsIDOMSettingsLock;
 
 function SettingsLock(aSettingsManager)
 {
   this._open = true;
+  this._isBusy = false;
   this._requests = new Queue();
   this._settingsManager = aSettingsManager;
   this._transaction = null;
@@ -129,129 +39,214 @@ function SettingsLock(aSettingsManager)
 
 SettingsLock.prototype = {
 
+  get closed() {
+    return !this._open;
+  },
+
+  _wrap: function _wrap(obj) {
+    return ObjectWrapper.wrap(obj, this._settingsManager._window);
+  },
+
   process: function process() {
     let lock = this;
     lock._open = false;
-    let store = lock._transaction.objectStore(STORE_NAME);
+    let store = lock._transaction.objectStore(SETTINGSSTORE_NAME);
 
     while (!lock._requests.isEmpty()) {
       let info = lock._requests.dequeue();
-      debug("info:" + info.intent);
+      if (DEBUG) debug("info: " + info.intent);
       let request = info.request;
       switch (info.intent) {
         case "clear":
-          let req = store.clear();
-          req.onsuccess = function() { this._open = true;
-                                       Services.DOMRequest.fireSuccess(request, 0);
-                                       this._open = false; }.bind(lock);
-          req.onerror = function() { Services.DOMRequest.fireError(request, 0) };
+          let clearReq = store.clear();
+          clearReq.onsuccess = function() {
+            this._open = true;
+            Services.DOMRequest.fireSuccess(request, 0);
+            this._open = false;
+          }.bind(lock);
+          clearReq.onerror = function() {
+            Services.DOMRequest.fireError(request, 0)
+          };
           break;
         case "set":
-          for (let key in info.settings) {
-            debug("key: " + key + ", val: " + JSON.stringify(info.settings[key]) + ", type: " + typeof(info.settings[key]));
+          let keys = Object.getOwnPropertyNames(info.settings);
+          for (let i = 0; i < keys.length; i++) {
+            let key = keys[i];
+            let last = i === keys.length - 1;
+            if (DEBUG) debug("key: " + key + ", val: " + JSON.stringify(info.settings[key]) + ", type: " + typeof(info.settings[key]));
+            lock._isBusy = true;
+            let checkKeyRequest = store.get(key);
 
-            if(typeof(info.settings[key]) != 'object') {
-              req = store.put({settingName: key, settingValue: info.settings[key]});
-            } else {
-              //Workaround for cloning issues
-              let obj = JSON.parse(JSON.stringify(info.settings[key]));
-              req = store.put({settingName: key, settingValue: obj});
-            }
+            checkKeyRequest.onsuccess = function (event) {
+              let defaultValue;
+              let userValue = info.settings[key];
+              if (event.target.result) {
+                defaultValue = event.target.result.defaultValue;
+              } else {
+                defaultValue = null;
+                if (DEBUG) debug("MOZSETTINGS-SET-WARNING: " + key + " is not in the database.\n");
+              }
 
-            req.onsuccess = function() { 
-              lock._open = true;
-              Services.DOMRequest.fireSuccess(request, 0);
-              Services.obs.notifyObservers(lock, "mozsettings-changed", JSON.stringify({
-                key: key,
-                value: info.settings[key]
-              }));
-              lock._open = false;
+              let obj = {settingName: key, defaultValue: defaultValue, userValue: userValue};
+              if (DEBUG) debug("store1: " + JSON.stringify(obj));
+              let setReq = store.put(obj);
+
+              setReq.onsuccess = function() {
+                lock._isBusy = false;
+                cpmm.sendAsyncMessage("Settings:Changed", { key: key, value: userValue });
+                if (last && !request.error) {
+                  lock._open = true;
+                  Services.DOMRequest.fireSuccess(request, 0);
+                  lock._open = false;
+                  if (!lock._requests.isEmpty()) {
+                    lock.process();
+                  }
+                }
+              };
+
+              setReq.onerror = function() {
+                if (!request.error) {
+                  Services.DOMRequest.fireError(request, setReq.error.name)
+                }
+              };
             };
-
-            req.onerror = function() { Services.DOMRequest.fireError(request, 0) };
+            checkKeyRequest.onerror = function(event) {
+              if (!request.error) {
+                Services.DOMRequest.fireError(request, checkKeyRequest.error.name)
+              }
+            };
           }
           break;
         case "get":
-          if (info.name == "*") {
-            req = store.getAll();
-          } else {
-            req = store.getAll(info.name);
-          }
-          req.onsuccess = function(event) {
-            debug("Request successful. Record count:" + event.target.result.length);
-            debug("result: " + JSON.stringify(event.target.result));
-            var result = {};
-            for (var i in event.target.result)
-              result[event.target.result[i].settingName] = event.target.result[i].settingValue;
+          let getReq = (info.name === "*") ? store.mozGetAll()
+                                           : store.mozGetAll(info.name);
+
+          getReq.onsuccess = function(event) {
+            if (DEBUG) debug("Request for '" + info.name + "' successful. " +
+                             "Record count: " + event.target.result.length);
+
+            if (event.target.result.length == 0) {
+              if (DEBUG) debug("MOZSETTINGS-GET-WARNING: " + info.name + " is not in the database.\n");
+            }
+
+            let results = {};
+
+            for (var i in event.target.result) {
+              let result = event.target.result[i];
+              var name = result.settingName;
+              if (DEBUG) debug("VAL: " + result.userValue +", " + result.defaultValue + "\n");
+              var value = result.userValue !== undefined ? result.userValue : result.defaultValue;
+              results[name] = this._wrap(value);
+            }
+
             this._open = true;
-            Services.DOMRequest.fireSuccess(request, result);
+            Services.DOMRequest.fireSuccess(request, this._wrap(results));
             this._open = false;
           }.bind(lock);
-          req.onerror = function() { Services.DOMRequest.fireError(request, 0)};
+
+          getReq.onerror = function() {
+            Services.DOMRequest.fireError(request, 0)
+          };
           break;
       }
     }
-    if (!lock._requests.isEmpty())
-      throw Components.results.NS_ERROR_ABORT;
     lock._open = true;
   },
 
   createTransactionAndProcess: function() {
-    if (this._settingsManager._settingsDB.db) {
+    if (this._settingsManager._settingsDB._db) {
       var lock;
       while (lock = this._settingsManager._locks.dequeue()) {
         if (!lock._transaction) {
-          lock._transaction = lock._settingsManager._settingsDB.db.transaction(STORE_NAME, "readwrite");
+          let transactionType = this._settingsManager.hasWritePrivileges ? "readwrite" : "readonly";
+          lock._transaction = lock._settingsManager._settingsDB._db.transaction(SETTINGSSTORE_NAME, transactionType);
         }
-        lock.process();
+        if (!lock._isBusy) {
+          lock.process();
+        } else {
+          this._settingsManager._locks.enqueue(lock);
+        }
       }
-      if (!this._requests.isEmpty())
+      if (!this._requests.isEmpty() && !this._isBusy) {
         this.process();
+      }
     }
   },
 
   get: function get(aName) {
-    if (!this._open)
+    if (!this._open) {
+      dump("Settings lock not open!\n");
       throw Components.results.NS_ERROR_ABORT;
+    }
 
-    if (this._settingsManager.hasReadPrivileges || this._settingsManager.hasReadWritePrivileges) {
+    if (this._settingsManager.hasReadPrivileges) {
       let req = Services.DOMRequest.createRequest(this._settingsManager._window);
       this._requests.enqueue({ request: req, intent:"get", name: aName });
       this.createTransactionAndProcess();
       return req;
     } else {
-      debug("get not allowed");
+      if (DEBUG) debug("get not allowed");
       throw Components.results.NS_ERROR_NOT_IMPLEMENTED;
     }
   },
 
-  set: function set(aSettings) {
-    if (!this._open)
-      throw Components.results.NS_ERROR_ABORT;
+  _serializePreservingBinaries: function _serializePreservingBinaries(aObject) {
+    // We need to serialize settings objects, otherwise they can change between
+    // the set() call and the enqueued request being processed. We can't simply
+    // parse(stringify(obj)) because that breaks things like Blobs, Files and
+    // Dates, so we use stringify's replacer and parse's reviver parameters to
+    // preserve binaries.
+    let binaries = Object.create(null);
+    let stringified = JSON.stringify(aObject, function(key, value) {
+      let kind = ObjectWrapper.getObjectKind(value);
+      if (kind == "file" || kind == "blob" || kind == "date") {
+        let uuid = Cc["@mozilla.org/uuid-generator;1"].getService(Ci.nsIUUIDGenerator)
+                                                      .generateUUID().toString();
+        binaries[uuid] = value;
+        return uuid;
+      }
+      return value;
+    });
+    return JSON.parse(stringified, function(key, value) {
+      if (value in binaries) {
+        return binaries[value];
+      }
+      return value;
+    });
+  },
 
-    if (this._settingsManager.hasReadWritePrivileges) {
+  set: function set(aSettings) {
+    if (!this._open) {
+      dump("Settings lock not open!\n");
+      throw Components.results.NS_ERROR_ABORT;
+    }
+
+    if (this._settingsManager.hasWritePrivileges) {
       let req = Services.DOMRequest.createRequest(this._settingsManager._window);
-      debug("send: " + JSON.stringify(aSettings));
-      this._requests.enqueue({request: req, intent: "set", settings: aSettings});
+      if (DEBUG) debug("send: " + JSON.stringify(aSettings));
+      let settings = this._serializePreservingBinaries(aSettings);
+      this._requests.enqueue({request: req, intent: "set", settings: settings});
       this.createTransactionAndProcess();
       return req;
     } else {
-      debug("set not allowed");
+      if (DEBUG) debug("set not allowed");
       throw Components.results.NS_ERROR_NOT_IMPLEMENTED;
     }
   },
 
   clear: function clear() {
-    if (!this._open)
+    if (!this._open) {
+      dump("Settings lock not open!\n");
       throw Components.results.NS_ERROR_ABORT;
+    }
 
-    if (this._settingsManager.hasReadWritePrivileges) {
+    if (this._settingsManager.hasWritePrivileges) {
       let req = Services.DOMRequest.createRequest(this._settingsManager._window);
       this._requests.enqueue({ request: req, intent: "clear"});
       this.createTransactionAndProcess();
       return req;
     } else {
-      debug("clear not allowed");
+      if (DEBUG) debug("clear not allowed");
       throw Components.results.NS_ERROR_NOT_IMPLEMENTED;
     }
   },
@@ -267,7 +262,7 @@ SettingsLock.prototype = {
 };
 
 const SETTINGSMANAGER_CONTRACTID = "@mozilla.org/settingsManager;1";
-const SETTINGSMANAGER_CID        = Components.ID("{5609d0a0-52a9-11e1-b86c-0800200c9a66}");
+const SETTINGSMANAGER_CID        = Components.ID("{c40b1c70-00fb-11e2-a21f-0800200c9a66}");
 const nsIDOMSettingsManager      = Ci.nsIDOMSettingsManager;
 
 let myGlobal = this;
@@ -275,13 +270,21 @@ let myGlobal = this;
 function SettingsManager()
 {
   this._locks = new Queue();
-  var idbManager = Components.classes["@mozilla.org/dom/indexeddb/manager;1"].getService(Ci.nsIIndexedDatabaseManager);
-  idbManager.initWindowless(myGlobal);
+  if (!("indexedDB" in myGlobal)) {
+    let idbManager = Components.classes["@mozilla.org/dom/indexeddb/manager;1"].getService(Ci.nsIIndexedDatabaseManager);
+    idbManager.initWindowless(myGlobal);
+  }
   this._settingsDB = new SettingsDB();
+  this._settingsDB.init(myGlobal);
 }
 
 SettingsManager.prototype = {
   _onsettingchange: null,
+  _callbacks: null,
+
+  _wrap: function _wrap(obj) {
+    return ObjectWrapper.wrap(obj, this._window);
+  },
 
   nextTick: function nextTick(aCallback, thisObj) {
     if (thisObj)
@@ -291,26 +294,88 @@ SettingsManager.prototype = {
   },
 
   set onsettingchange(aCallback) {
-    if (this.hasReadPrivileges || this.hasReadWritePrivileges)
+    if (this.hasReadPrivileges) {
+      if (!this._onsettingchange) {
+        cpmm.sendAsyncMessage("Settings:RegisterForMessages");
+      }
       this._onsettingchange = aCallback;
-    else
+    } else {
       throw Components.results.NS_ERROR_NOT_IMPLEMENTED;
+    }
   },
 
   get onsettingchange() {
     return this._onsettingchange;
   },
 
-  getLock: function() {
-    debug("get lock!");
+  createLock: function() {
+    if (DEBUG) debug("get lock!");
     var lock = new SettingsLock(this);
     this._locks.enqueue(lock);
     this._settingsDB.ensureDB(
       function() { lock.createTransactionAndProcess(); },
-      function() { dump("ensureDB error cb!\n"); },
+      function() { dump("Cannot open Settings DB. Trying to open an old version?\n"); },
       myGlobal );
     this.nextTick(function() { this._open = false; }, lock);
     return lock;
+  },
+
+  receiveMessage: function(aMessage) {
+    if (DEBUG) debug("Settings::receiveMessage: " + aMessage.name);
+    let msg = aMessage.json;
+
+    switch (aMessage.name) {
+      case "Settings:Change:Return:OK":
+        if (this._onsettingchange || this._callbacks) {
+          if (DEBUG) debug('data:' + msg.key + ':' + msg.value + '\n');
+
+          if (this._onsettingchange) {
+            let event = new this._window.MozSettingsEvent("settingchanged", {
+              settingName: msg.key,
+              settingValue: msg.value
+            });
+            this._onsettingchange.handleEvent(event);
+          }
+          if (this._callbacks && this._callbacks[msg.key]) {
+            if (DEBUG) debug("observe callback called! " + msg.key + " " + this._callbacks[msg.key].length);
+            this._callbacks[msg.key].forEach(function(cb) {
+              cb(this._wrap({settingName: msg.key, settingValue: msg.value}));
+            }.bind(this));
+          }
+        } else {
+          if (DEBUG) debug("no observers stored!");
+        }
+        break;
+      default:
+        if (DEBUG) debug("Wrong message: " + aMessage.name);
+    }
+  },
+
+  addObserver: function addObserver(aName, aCallback) {
+    if (DEBUG) debug("addObserver " + aName);
+    if (!this._callbacks) {
+      cpmm.sendAsyncMessage("Settings:RegisterForMessages");
+      this._callbacks = {};
+    }
+    if (!this._callbacks[aName]) {
+      this._callbacks[aName] = [aCallback];
+    } else {
+      this._callbacks[aName].push(aCallback);
+    }
+  },
+
+  removeObserver: function removeObserver(aName, aCallback) {
+    if (DEBUG) debug("deleteObserver " + aName);
+    if (this._callbacks && this._callbacks[aName]) {
+      let index = this._callbacks[aName].indexOf(aCallback)
+      if (index != -1) {
+        this._callbacks[aName].splice(index, 1)
+      } else {
+        if (DEBUG) debug("Callback not found for: " + aName);
+      }
+    } else {
+      if (DEBUG) debug("No observers stored for " + aName);
+    }
   },
 
   init: function(aWindow) {
@@ -318,47 +383,36 @@ SettingsManager.prototype = {
     if (!Services.prefs.getBoolPref("dom.mozSettings.enabled"))
       return null;
 
+    cpmm.addMessageListener("Settings:Change:Return:OK", this);
     this._window = aWindow;
     Services.obs.addObserver(this, "inner-window-destroyed", false);
-    Services.obs.addObserver(this, "mozsettings-changed", false);
     let util = aWindow.QueryInterface(Ci.nsIInterfaceRequestor).getInterface(Ci.nsIDOMWindowUtils);
     this.innerWindowID = util.currentInnerWindowID;
 
-    let principal = aWindow.document.nodePrincipal;
-    let secMan = Cc["@mozilla.org/scriptsecuritymanager;1"].getService(Ci.nsIScriptSecurityManager);
-    let readPerm = principal == secMan.getSystemPrincipal() ? Ci.nsIPermissionManager.ALLOW_ACTION : Services.perms.testExactPermission(principal.URI, "websettings-read");
-    let readwritePerm = principal == secMan.getSystemPrincipal() ? Ci.nsIPermissionManager.ALLOW_ACTION : Services.perms.testExactPermission(principal.URI, "websettings-readwrite");
+    let readPerm = Services.perms.testExactPermissionFromPrincipal(aWindow.document.nodePrincipal, "settings-read");
+    let writePerm = Services.perms.testExactPermissionFromPrincipal(aWindow.document.nodePrincipal, "settings-write");
     this.hasReadPrivileges = readPerm == Ci.nsIPermissionManager.ALLOW_ACTION;
-    this.hasReadWritePrivileges = readwritePerm == Ci.nsIPermissionManager.ALLOW_ACTION;
-    debug("has read privileges :" + this.hasReadPrivileges + ", has read-write privileges: " + this.hasReadWritePrivileges);
+    this.hasWritePrivileges = writePerm == Ci.nsIPermissionManager.ALLOW_ACTION;
+
+    if (!this.hasReadPrivileges && !this.hasWritePrivileges) {
+      Cu.reportError("NO SETTINGS PERMISSION FOR: " + aWindow.document.nodePrincipal.origin + "\n");
+      return null;
+    }
   },
 
   observe: function(aSubject, aTopic, aData) {
-    debug("Topic: " + aTopic);
+    if (DEBUG) debug("Topic: " + aTopic);
     if (aTopic == "inner-window-destroyed") {
       let wId = aSubject.QueryInterface(Ci.nsISupportsPRUint64).data;
       if (wId == this.innerWindowID) {
         Services.obs.removeObserver(this, "inner-window-destroyed");
-        Services.obs.removeObserver(this, "mozsettings-changed");
+        cpmm.removeMessageListener("Settings:Change:Return:OK", this);
         this._requests = null;
         this._window = null;
         this._innerWindowID = null;
         this._onsettingchange = null;
         this._settingsDB.close();
       }
-    } else if (aTopic == "mozsettings-changed") {
-      if (!this._onsettingchange)
-        return;
-
-      let data = JSON.parse(aData);
-      debug('data:' + data.key + ':' + data.value + '\n');
-
-      let event = new this._window.MozSettingsEvent("settingchanged", {
-        settingName: data.key,
-        settingValue: data.value
-      });
-
-      this._onsettingchange.handleEvent(event);
     }
   },
 
@@ -372,4 +426,4 @@ SettingsManager.prototype = {
                                      flags: nsIClassInfo.DOM_OBJECT})
 }
 
-const NSGetFactory = XPCOMUtils.generateNSGetFactory([SettingsManager, SettingsLock])
+this.NSGetFactory = XPCOMUtils.generateNSGetFactory([SettingsManager, SettingsLock])

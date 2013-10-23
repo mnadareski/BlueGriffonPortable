@@ -1,0 +1,6 @@
+style chrome://global/content/customizeToolbar.xul chrome://mathml/skin/mathmlToolbar.css
+content mathml jar:chrome.jar!/mathml/content/mathml/
+locale mathml en-US jar:chrome.jar!/mathml-locale/locale/en-US/mathml/
+style chrome://bluegriffon/content/xul/bluegriffon.xul chrome://mathml/skin/mathmlToolbar.css
+overlay chrome://bluegriffon/content/xul/bluegriffon.xul chrome://mathml/content/mathmlOverlay.xul
+skin mathml classic/1.0 jar:chrome.jar!/mathml/skin/classic/mathml/

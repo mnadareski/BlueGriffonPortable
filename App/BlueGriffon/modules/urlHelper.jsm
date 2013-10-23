@@ -431,6 +431,20 @@ var UrlUtils = {
     return filename ? filename : "";
   },
 
+  getFileExtension: function getFileExtension(aURLSpec)
+  {
+    var filename = "";
+    var uri = this._getURI(aURLSpec);
+    if (uri)
+    {
+      var url = uri.QueryInterface(Components.interfaces.nsIURL);
+      if (url)
+        filename = url.fileExtension;
+    }
+
+    return filename ? filename : "";
+  },
+
   stripUsernamePassword: function stripUsernamePassword(aURLSpec, usernameObj, passwordObj)
   {
     var urlspec = aURLSpec.trim();
@@ -572,8 +586,51 @@ var UrlUtils = {
     }
     catch (e) { }
     return null;
-  }
+  },
 
+  getClipboardAsString: function()
+  {
+    var clip = Components.classes["@mozilla.org/widget/clipboard;1"]
+                         .getService(Components.interfaces.nsIClipboard);
+    if (clip) {
+    
+      var trans = Components.classes["@mozilla.org/widget/transferable;1"]
+                            .createInstance(Components.interfaces.nsITransferable);
+      if (trans) {
+        trans.addDataFlavor("text/unicode");
+
+        clip.getData(trans, clip.kGlobalClipboard);
+        
+        var str       = new Object();
+        var strLength = new Object();
+        
+        trans.getTransferData("text/unicode", str, strLength);
+        if (str) {
+          str = str.value.QueryInterface(Components.interfaces.nsISupportsString);
+          pastetext = str.data.substring(0, strLength.value / 2);
+          if (pastetext) {
+            return pastetext
+          }
+        }
+      }
+    }
+    return "";
+  },
+
+  getURLFromClipboard: function()
+  {
+    var pastetext = this.getClipboardAsString();
+    if (pastetext) {
+      try {
+        var uri = Components.classes['@mozilla.org/network/standard-url;1']
+                            .createInstance(Components.interfaces.nsIURL);
+        uri.spec = pastetext;
+        return decodeURI(uri.spec);
+      }
+      catch(e) { }
+    }
+    return "";
+  }
 };
 
 

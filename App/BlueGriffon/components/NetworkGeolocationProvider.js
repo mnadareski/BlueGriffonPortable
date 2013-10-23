@@ -1,39 +1,6 @@
-/* ***** BEGIN LICENSE BLOCK *****
- * Version: MPL 1.1/GPL 2.0/LGPL 2.1
- *
- * The contents of this file are subject to the Mozilla Public License Version
- * 1.1 (the "License"); you may not use this file except in compliance with
- * the License. You may obtain a copy of the License at
- * http://www.mozilla.org/MPL/
- *
- * Software distributed under the License is distributed on an "AS IS" basis,
- * WITHOUT WARRANTY OF ANY KIND, either express or implied. See the License
- * for the specific language governing rights and limitations under the
- * License.
- *
- * The Original Code is Network Location Provider for GLS.
- *
- * The Initial Developer of the Original Code is
- * Mozilla Foundation.
- * Portions created by the Initial Developer are Copyright (C) 2011
- * the Initial Developer. All Rights Reserved.
- *
- * Contributor(s):
- *   Doug Turner <dougt@dougt.org>
- *
- * Alternatively, the contents of this file may be used under the terms of
- * either the GNU General Public License Version 2 or later (the "GPL"), or
- * the GNU Lesser General Public License Version 2.1 or later (the "LGPL"),
- * in which case the provisions of the GPL or the LGPL are applicable instead
- * of those above. If you wish to allow use of your version of this file only
- * under the terms of either the GPL or the LGPL, and not to allow others to
- * use your version of this file under the terms of the MPL, indicate your
- * decision by deleting the provisions above and replace them with the notice
- * and other provisions required by the GPL or the LGPL. If you do not delete
- * the provisions above, a recipient may use your version of this file under
- * the terms of any one of the MPL, the GPL or the LGPL.
- *
- * ***** END LICENSE BLOCK ***** */
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 
 // Do not use this API without permission from Google.
@@ -48,6 +15,10 @@ const Cc = Components.classes;
 
 let gLoggingEnabled = false;
 let gTestingEnabled = false;
+let gUseScanning = true;
+
+let gPrivateAccessToken = '';
+let gPrivateAccessTime = 0;
 
 function LOG(aMsg) {
   if (gLoggingEnabled)
@@ -91,6 +62,11 @@ WifiGeoPositionObject.prototype = {
                                     classDescription: "wifi geo location position object"}),
 };
 
+function privateBrowsingObserver(aSubject, aTopic, aData) {
+  gPrivateAccessToken = '';
+  gPrivateAccessTime = 0;
+}
+
 function WifiGeoPositionProvider() {
   try {
     gLoggingEnabled = Services.prefs.getBoolPref("geo.wifi.logging.enabled");
@@ -100,10 +76,17 @@ function WifiGeoPositionProvider() {
     gTestingEnabled = Services.prefs.getBoolPref("geo.wifi.testing");
   } catch (e) {}
 
+  try {
+    gUseScanning = Services.prefs.getBoolPref("geo.wifi.scan");
+  } catch (e) {}
+
   this.wifiService = null;
   this.timer = null;
   this.hasSeenWiFi = false;
   this.started = false;
+  this.lastRequestPrivate = false;
+
+  Services.obs.addObserver(privateBrowsingObserver, "last-pb-context-exited", false);
 }
 
 WifiGeoPositionProvider.prototype = {
@@ -129,16 +112,24 @@ WifiGeoPositionProvider.prototype = {
       this.timer.initWithCallback(this, 200, this.timer.TYPE_REPEATING_SLACK);
   },
 
-  watch: function(c) {
+  watch: function(c, requestPrivate) {
     LOG("watch called");
-    if (!this.wifiService) {
+
+    if (!this.wifiService && gUseScanning) {
       this.wifiService = Cc["@mozilla.org/wifi/monitor;1"].getService(Components.interfaces.nsIWifiMonitor);
       this.wifiService.startWatching(this);
+      this.lastRequestPrivate = requestPrivate;
     }
     if (this.hasSeenWiFi) {
       this.hasSeenWiFi = false;
-      this.wifiService.stopWatching(this);
-      this.wifiService.startWatching(this);
+      if (gUseScanning) {
+        this.wifiService.stopWatching(this);
+        this.wifiService.startWatching(this);
+      } else {
+        // For testing situations, ensure that we always trigger an update.
+        this.timer.initWithCallback(this, 5000, this.timer.TYPE_ONE_SHOT);
+      }
+      this.lastRequestPrivate = requestPrivate;
     }
   },
 
@@ -171,11 +162,20 @@ WifiGeoPositionProvider.prototype = {
     // check to see if we have an access token:
     let accessToken = "";
     try {
-      let accessTokenPrefName = "geo.wifi.access_token." + url;
-      accessToken = Services.prefs.getCharPref(accessTokenPrefName);
+      if (this.lastRequestPrivate) {
+        accessToken = gPrivateAccessToken;
+      } else {
+        let accessTokenPrefName = "geo.wifi.access_token." + url;
+        accessToken = Services.prefs.getCharPref(accessTokenPrefName);
+      }
 
       // check to see if it has expired
-      let accessTokenDate = Services.prefs.getIntPref(accessTokenPrefName + ".time");
+      let accessTokenDate;
+      if (this.lastRequestPrivate) {
+        accessTokenDate = gPrivateAccessTime;
+      } else {
+        accessTokenDate = Services.prefs.getIntPref(accessTokenPrefName + ".time");
+      }
       
       let accessTokenInterval = 1209600;  // seconds in 2 weeks
       try {
@@ -285,17 +285,26 @@ WifiGeoPositionProvider.prototype = {
         {
           let accessToken = "";
           let accessTokenPrefName = "geo.wifi.access_token." + providerUrlBase;
-          try { accessToken = Services.prefs.getCharPref(accessTokenPrefName); } catch (e) {}
+          if (this.lastRequestPrivate) {
+            accessTokenPrefName = gPrivateAccessToken;
+          } else {
+            try { accessToken = Services.prefs.getCharPref(accessTokenPrefName); } catch (e) {}
+          }
 
           if (accessToken != newAccessToken) {
             // no match, lets cache
-              LOG("New Access Token: " + newAccessToken + "\n" + accessTokenPrefName);
+            LOG("New Access Token: " + newAccessToken + "\n" + accessTokenPrefName);
+            if (this.lastRequestPrivate) {
+              gPrivateAccessToken = newAccessToken;
+              gPrivateAccessTime = nowInSeconds();
+            } else {
               try {
                 Services.prefs.setIntPref(accessTokenPrefName + ".time", nowInSeconds());
                 Services.prefs.setCharPref(accessTokenPrefName, newAccessToken);
               } catch (x) {
                   // XXX temporary hack for bug 575346 to allow geolocation to function
               }
+            }
           }
         }
     }, false);
@@ -309,7 +318,7 @@ WifiGeoPositionProvider.prototype = {
   },
 
   notify: function (timer) {
-    if (gTestingEnabled) {
+    if (gTestingEnabled || !gUseScanning) {
       // if we are testing, timer is repeating
       this.onChange(null);
     }
@@ -321,4 +330,4 @@ WifiGeoPositionProvider.prototype = {
   },
 };
 
-let NSGetFactory = XPCOMUtils.generateNSGetFactory([WifiGeoPositionProvider]);
+this.NSGetFactory = XPCOMUtils.generateNSGetFactory([WifiGeoPositionProvider]);

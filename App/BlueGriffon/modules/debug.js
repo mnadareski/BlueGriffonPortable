@@ -1,6 +1,14 @@
-//@line 44 "c:\trees\official1.4\toolkit\content\debug.js"
+/* vim:set ts=2 sw=2 sts=2 ci et: */
+/* -*- Mode: Java; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 
-var EXPORTED_SYMBOLS = ["NS_ASSERT"];
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
+// This file contains functions that are useful for debugging purposes from
+// within JavaScript code.
+
+this.EXPORTED_SYMBOLS = ["NS_ASSERT"];
 
 var gTraceOnAssert = true;
 
@@ -21,7 +29,7 @@ var gTraceOnAssert = true;
  * @param message   a string to be displayed upon failure of the assertion
  */
 
-function NS_ASSERT(condition, message) {
+this.NS_ASSERT = function NS_ASSERT(condition, message) {
   if (condition)
     return;
 

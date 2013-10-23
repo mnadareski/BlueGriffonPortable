@@ -1,46 +1,9 @@
 /* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
-/* ***** BEGIN LICENSE BLOCK *****
- * Version: MPL 1.1/GPL 2.0/LGPL 2.1
- *
- * The contents of this file are subject to the Mozilla Public License Version
- * 1.1 (the "License"); you may not use this file except in compliance with
- * the License. You may obtain a copy of the License at
- * http://www.mozilla.org/MPL/
- *
- * Software distributed under the License is distributed on an "AS IS" basis,
- * WITHOUT WARRANTY OF ANY KIND, either express or implied. See the License
- * for the specific language governing rights and limitations under the
- * License.
- *
- * The Original Code is the Places Command Controller.
- *
- * The Initial Developer of the Original Code is Google Inc.
- * Portions created by the Initial Developer are Copyright (C) 2005
- * the Initial Developer. All Rights Reserved.
- *
- * Contributor(s):
- *   Ben Goodger <beng@google.com>
- *   Myk Melez <myk@mozilla.org>
- *   Asaf Romano <mano@mozilla.com>
- *   Sungjoon Steve Won <stevewon@gmail.com>
- *   Dietrich Ayala <dietrich@mozilla.com>
- *   Marco Bonardo <mak77@bonardo.net>
- *
- * Alternatively, the contents of this file may be used under the terms of
- * either the GNU General Public License Version 2 or later (the "GPL"), or
- * the GNU Lesser General Public License Version 2.1 or later (the "LGPL"),
- * in which case the provisions of the GPL or the LGPL are applicable instead
- * of those above. If you wish to allow use of your version of this file only
- * under the terms of either the GPL or the LGPL, and not to allow others to
- * use your version of this file under the terms of the MPL, indicate your
- * decision by deleting the provisions above and replace them with the notice
- * and other provisions required by the GPL or the LGPL. If you do not delete
- * the provisions above, a recipient may use your version of this file under
- * the terms of any one of the MPL, the GPL or the LGPL.
- *
- * ***** END LICENSE BLOCK ***** */
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-const EXPORTED_SYMBOLS = [
+this.EXPORTED_SYMBOLS = [
   "PlacesUtils"
 , "PlacesAggregatedTransaction"
 , "PlacesCreateFolderTransaction"
@@ -69,30 +32,30 @@ const Cu = Components.utils;
 
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 
-XPCOMUtils.defineLazyGetter(this, "Services", function() {
-  Cu.import("resource://gre/modules/Services.jsm");
-  return Services;
-});
+XPCOMUtils.defineLazyModuleGetter(this, "Services",
+                                  "resource://gre/modules/Services.jsm");
 
-XPCOMUtils.defineLazyGetter(this, "NetUtil", function() {
-  Cu.import("resource://gre/modules/NetUtil.jsm");
-  return NetUtil;
-});
+XPCOMUtils.defineLazyModuleGetter(this, "NetUtil",
+                                  "resource://gre/modules/NetUtil.jsm");
+
+XPCOMUtils.defineLazyModuleGetter(this, "Task",
+                                  "resource://gre/modules/Task.jsm");
+
+XPCOMUtils.defineLazyModuleGetter(this, "Promise",
+                                  "resource://gre/modules/commonjs/sdk/core/promise.js");
+
+XPCOMUtils.defineLazyModuleGetter(this, "Deprecated",
+                                  "resource://gre/modules/Deprecated.jsm");
 
 // The minimum amount of transactions before starting a batch. Usually we do
 // do incremental updates, a batch will cause views to completely
 // refresh instead.
 const MIN_TRANSACTIONS_FOR_BATCH = 5;
 
-// The RESTORE_*_NSIOBSERVER_TOPIC constants should match the #defines of the
-// same names in browser/components/places/src/nsPlacesExportService.cpp
-const RESTORE_BEGIN_NSIOBSERVER_TOPIC = "bookmarks-restore-begin";
-const RESTORE_SUCCESS_NSIOBSERVER_TOPIC = "bookmarks-restore-success";
-const RESTORE_FAILED_NSIOBSERVER_TOPIC = "bookmarks-restore-failed";
-const RESTORE_NSIOBSERVER_DATA = "json";
-
+//@line 60 "c:\trees\official1.7\toolkit\components\places\PlacesUtils.jsm"
 // On other platforms, the transferable system converts "\r\n" to "\n".
 const NEWLINE = "\r\n";
+//@line 63 "c:\trees\official1.7\toolkit\components\places\PlacesUtils.jsm"
 
 function QI_node(aNode, aIID) {
   var result = null;
@@ -103,12 +66,16 @@ function QI_node(aNode, aIID) {
   }
   return result;
 }
-function asVisit(aNode) QI_node(aNode, Ci.nsINavHistoryVisitResultNode);
-function asFullVisit(aNode) QI_node(aNode, Ci.nsINavHistoryFullVisitResultNode);
+function asVisit(aNode) {
+  Deprecated.warning(
+    "asVisit is deprecated and will be removed in a future version",
+    "https://bugzilla.mozilla.org/show_bug.cgi?id=561450");
+  return aNode;
+};
 function asContainer(aNode) QI_node(aNode, Ci.nsINavHistoryContainerResultNode);
 function asQuery(aNode) QI_node(aNode, Ci.nsINavHistoryQueryResultNode);
 
-var PlacesUtils = {
+this.PlacesUtils = {
   // Place entries that are containers, e.g. bookmark folders or queries.
   TYPE_X_MOZ_PLACE_CONTAINER: "text/x-moz-place-container",
   // Place entries that are bookmark separators.
@@ -129,6 +96,7 @@ var PlacesUtils = {
   LMANNO_SITEURI: "livemark/siteURI",
   POST_DATA_ANNO: "bookmarkProperties/POSTData",
   READ_ONLY_ANNO: "placesInternal/READ_ONLY",
+  CHARSET_ANNO: "URIProperties/characterSet",
 
   TOPIC_SHUTDOWN: "places-shutdown",
   TOPIC_INIT_COMPLETE: "places-init-complete",
@@ -137,9 +105,11 @@ var PlacesUtils = {
   TOPIC_FEEDBACK_UPDATED: "places-autocomplete-feedback-updated",
   TOPIC_FAVICONS_EXPIRED: "places-favicons-expired",
   TOPIC_VACUUM_STARTING: "places-vacuum-starting",
+  TOPIC_BOOKMARKS_RESTORE_BEGIN: "bookmarks-restore-begin",
+  TOPIC_BOOKMARKS_RESTORE_SUCCESS: "bookmarks-restore-success",
+  TOPIC_BOOKMARKS_RESTORE_FAILED: "bookmarks-restore-failed",
 
   asVisit: function(aNode) asVisit(aNode),
-  asFullVisit: function(aNode) asFullVisit(aNode),
   asContainer: function(aNode) asContainer(aNode),
   asQuery: function(aNode) asQuery(aNode),
 
@@ -205,8 +175,7 @@ var PlacesUtils = {
    * @returns true if the node is a Bookmark separator, false otherwise
    */
   nodeIsSeparator: function PU_nodeIsSeparator(aNode) {
-
-    return (aNode.type == Ci.nsINavHistoryResultNode.RESULT_TYPE_SEPARATOR);
+    return aNode.type == Ci.nsINavHistoryResultNode.RESULT_TYPE_SEPARATOR;
   },
 
   /**
@@ -216,9 +185,13 @@ var PlacesUtils = {
    * @returns true if the node is a visit item, false otherwise
    */
   nodeIsVisit: function PU_nodeIsVisit(aNode) {
-    var type = aNode.type;
-    return type == Ci.nsINavHistoryResultNode.RESULT_TYPE_VISIT ||
-           type == Ci.nsINavHistoryResultNode.RESULT_TYPE_FULL_VISIT;
+    Deprecated.warning(
+      "nodeIsVisit is deprecated ans will be removed in a future version",
+      "https://bugzilla.mozilla.org/show_bug.cgi?id=561450");
+    return this.nodeIsURI(aNode) && aNode.parent &&
+           this.nodeIsQuery(aNode.parent) &&
+           asQuery(aNode.parent).queryOptions.resultType ==
+             Ci.nsINavHistoryQueryOptions.RESULTS_AS_VISIT;
   },
 
   /**
@@ -227,11 +200,14 @@ var PlacesUtils = {
    *          A result node
    * @returns true if the node is a URL item, false otherwise
    */
-  uriTypes: [Ci.nsINavHistoryResultNode.RESULT_TYPE_URI,
-             Ci.nsINavHistoryResultNode.RESULT_TYPE_VISIT,
-             Ci.nsINavHistoryResultNode.RESULT_TYPE_FULL_VISIT],
+  get uriTypes() {
+    Deprecated.warning(
+      "uriTypes is deprecated ans will be removed in a future version",
+      "https://bugzilla.mozilla.org/show_bug.cgi?id=561450");
+    return [Ci.nsINavHistoryResultNode.RESULT_TYPE_URI];
+  },
   nodeIsURI: function PU_nodeIsURI(aNode) {
-    return this.uriTypes.indexOf(aNode.type) != -1;
+    return aNode.type == Ci.nsINavHistoryResultNode.RESULT_TYPE_URI;
   },
 
   /**
@@ -483,49 +459,6 @@ var PlacesUtils = {
   },
 
   /**
-   * Determines if a container item id is a livemark.
-   * @param aItemId
-   *        The id of the potential livemark.
-   * @returns true if the item is a livemark.
-   * @deprecated see the new API in mozIAsyncLivemarks.
-   */
-  itemIsLivemark: function PU_itemIsLivemark(aItemId) {
-    Cu.reportError("Synchronous livemarks methods and PlacesUtils livemarks " +
-                   "utils (itemIsLivemark, nodeIsLivemarkContainer, " +
-                   "nodeIsLivemarkItem) are deprecated and will be removed " +
-                   "in a future release.");
-    // If the Livemark service hasn't yet been initialized then
-    // use the annotations service directly to avoid instanciating
-    // it on startup. (bug 398300)
-    if (Object.getOwnPropertyDescriptor(this, "livemarks").value === undefined)
-      return this.annotations.itemHasAnnotation(aItemId, this.LMANNO_FEEDURI);
-    // If the livemark service has already been instanciated, use it.
-    return this.livemarks.isLivemark(aItemId);
-  },
-
-  /**
-   * Determines whether a result node is a livemark container.
-   * @param aNode
-   *        A result Node
-   * @returns true if the node is a livemark container item
-   * @deprecated see the new API in mozIAsyncLivemarks.
-   */
-  nodeIsLivemarkContainer: function PU_nodeIsLivemarkContainer(aNode) {
-    return this.nodeIsFolder(aNode) && this.itemIsLivemark(aNode.itemId);
-  },
-
- /**
-  * Determines whether a result node is a livemark item
-  * @param aNode
-  *        A result node
-  * @returns true if the node is a livemark container item
-   * @deprecated see the new API in mozIAsyncLivemarks.
-  */
-  nodeIsLivemarkItem: function PU_nodeIsLivemarkItem(aNode) {
-    return aNode.parent && this.nodeIsLivemarkContainer(aNode.parent);
-  },
-
-  /**
    * Determines whether or not a node is a readonly folder.
    * @param   aNode
    *          The node to test.
@@ -587,18 +520,21 @@ var PlacesUtils = {
 
     function gatherLivemarkUrl(aNode) {
       try {
-        return PlacesUtils.annotations.getItemAnnotation(aNode.itemId,
-                                                         this.LMANNO_SITEURI);
+        return PlacesUtils.annotations
+                          .getItemAnnotation(aNode.itemId,
+                                             PlacesUtils.LMANNO_SITEURI);
       } catch (ex) {
-        return PlacesUtils.annotations.getItemAnnotation(aNode.itemId,
-                                                         this.LMANNO_FEEDURI);
+        return PlacesUtils.annotations
+                          .getItemAnnotation(aNode.itemId,
+                                             PlacesUtils.LMANNO_FEEDURI);
       }
     }
 
     function isLivemark(aNode) {
       return PlacesUtils.nodeIsFolder(aNode) &&
-             PlacesUtils.annotations.itemHasAnnotation(aNode.itemId,
-                                                       this.LMANNO_FEEDURI);
+             PlacesUtils.annotations
+                        .itemHasAnnotation(aNode.itemId,
+                                           PlacesUtils.LMANNO_FEEDURI);
     }
 
     switch (aType) {
@@ -1430,8 +1366,9 @@ var PlacesUtils = {
           if (tags.length)
             this.tagging.tagURI(this._uri(aData.uri), tags);
         }
-        if (aData.charset)
-          this.history.setCharsetForURI(this._uri(aData.uri), aData.charset);
+        if (aData.charset) {
+            this.setCharsetForURI(this._uri(aData.uri), aData.charset);
+        }
         if (aData.uri.substr(0, 6) == "place:")
           searchIds.push(id);
         if (aData.icon) {
@@ -1439,7 +1376,8 @@ var PlacesUtils = {
             // Create a fake faviconURI to use (FIXME: bug 523932)
             let faviconURI = this._uri("fake-favicon-uri:" + aData.uri);
             this.favicons.replaceFaviconDataFromDataURL(faviconURI, aData.icon, 0);
-            this.favicons.setAndFetchFaviconForPage(this._uri(aData.uri), faviconURI, false);
+            this.favicons.setAndFetchFaviconForPage(this._uri(aData.uri), faviconURI, false,
+              this.favicons.FAVICON_LOAD_NON_PRIVATE);
           } catch (ex) {
             Components.utils.reportError("Failed to import favicon data:"  + ex);
           }
@@ -1448,7 +1386,8 @@ var PlacesUtils = {
           try {
             this.favicons.setAndFetchFaviconForPage(this._uri(aData.uri),
                                                     this._uri(aData.iconUri),
-                                                    false);
+                                                    false,
+                                                    this.favicons.FAVICON_LOAD_NON_PRIVATE);
           } catch (ex) {
             Components.utils.reportError("Failed to import favicon URI:"  + ex);
           }
@@ -1724,9 +1663,11 @@ var PlacesUtils = {
    */
   restoreBookmarksFromJSONFile:
   function PU_restoreBookmarksFromJSONFile(aFile) {
+    const RESTORE_NSIOBSERVER_DATA = "json";
+
     let failed = false;
     Services.obs.notifyObservers(null,
-                                 RESTORE_BEGIN_NSIOBSERVER_TOPIC,
+                                 this.TOPIC_BOOKMARKS_RESTORE_BEGIN,
                                  RESTORE_NSIOBSERVER_DATA);
 
     try {
@@ -1754,7 +1695,7 @@ var PlacesUtils = {
     catch (exc) {
       failed = true;
       Services.obs.notifyObservers(null,
-                                   RESTORE_FAILED_NSIOBSERVER_TOPIC,
+                                   this.TOPIC_BOOKMARKS_RESTORE_FAILED,
                                    RESTORE_NSIOBSERVER_DATA);
       Cu.reportError("Bookmarks JSON restore failed: " + exc);
       throw exc;
@@ -1762,7 +1703,7 @@ var PlacesUtils = {
     finally {
       if (!failed) {
         Services.obs.notifyObservers(null,
-                                     RESTORE_SUCCESS_NSIOBSERVER_TOPIC,
+                                     this.TOPIC_BOOKMARKS_RESTORE_SUCCESS,
                                      RESTORE_NSIOBSERVER_DATA);
       }
     }
@@ -2069,7 +2010,7 @@ var PlacesUtils = {
   asyncGetBookmarkIds: function PU_asyncGetBookmarkIds(aURI, aCallback, aScope)
   {
     if (!this._asyncGetBookmarksStmt) {
-      let db = this.history.QueryInterface(Ci.nsPIPlacesDatabase).DBConnection;
+      let db = this.history.DBConnection;
       this._asyncGetBookmarksStmt = db.createAsyncStatement(
         "SELECT b.id "
       + "FROM moz_bookmarks b "
@@ -2150,6 +2091,57 @@ var PlacesUtils = {
     if (index != -1) {
       this._bookmarksServiceObserversQueue.splice(index, 1);
     }
+  },
+
+  /**
+   * Sets the character-set for a URI.
+   *
+   * @param aURI nsIURI
+   * @param aCharset character-set value.
+   * @return {Promise}
+   */
+  setCharsetForURI: function PU_setCharsetForURI(aURI, aCharset) {
+    let deferred = Promise.defer();
+
+    // Delaying to catch issues with asynchronous behavior while waiting
+    // to implement asynchronous annotations in bug 699844.
+    Services.tm.mainThread.dispatch(function() {
+      if (aCharset && aCharset.length > 0) {
+        PlacesUtils.annotations.setPageAnnotation(
+          aURI, PlacesUtils.CHARSET_ANNO, aCharset, 0,
+          Ci.nsIAnnotationService.EXPIRE_NEVER);
+      } else {
+        PlacesUtils.annotations.removePageAnnotation(
+          aURI, PlacesUtils.CHARSET_ANNO);
+      }
+      deferred.resolve();
+    }, Ci.nsIThread.DISPATCH_NORMAL);
+
+    return deferred.promise;
+  },
+
+  /**
+   * Gets the last saved character-set for a URI.
+   *
+   * @param aURI nsIURI
+   * @return {Promise}
+   * @resolve a character-set or null.
+   */
+  getCharsetForURI: function PU_getCharsetForURI(aURI) {
+    let deferred = Promise.defer();
+
+    Services.tm.mainThread.dispatch(function() {
+      let charset = null;
+
+      try {
+        charset = PlacesUtils.annotations.getPageAnnotation(aURI,
+                                                            PlacesUtils.CHARSET_ANNO);
+      } catch (ex) { }
+
+      deferred.resolve(charset);
+    }, Ci.nsIThread.DISPATCH_NORMAL);
+
+    return deferred.promise;
   }
 };
 
@@ -2188,20 +2180,19 @@ AsyncStatementCancelWrapper.prototype = {
   }
 }
 
-XPCOMUtils.defineLazyServiceGetter(PlacesUtils, "history",
-                                   "@mozilla.org/browser/nav-history-service;1",
-                                   "nsINavHistoryService");
+XPCOMUtils.defineLazyGetter(PlacesUtils, "history", function() {
+  return Cc["@mozilla.org/browser/nav-history-service;1"]
+           .getService(Ci.nsINavHistoryService)
+           .QueryInterface(Ci.nsIBrowserHistory)
+           .QueryInterface(Ci.nsPIPlacesDatabase);
+});
 
 XPCOMUtils.defineLazyServiceGetter(PlacesUtils, "asyncHistory",
                                    "@mozilla.org/browser/history;1",
                                    "mozIAsyncHistory");
 
 XPCOMUtils.defineLazyGetter(PlacesUtils, "bhistory", function() {
-  return PlacesUtils.history.QueryInterface(Ci.nsIBrowserHistory);
-});
-
-XPCOMUtils.defineLazyGetter(PlacesUtils, "ghistory2", function() {
-  return PlacesUtils.history.QueryInterface(Ci.nsIGlobalHistory2);
+  return PlacesUtils.history;
 });
 
 XPCOMUtils.defineLazyServiceGetter(PlacesUtils, "favicons",
@@ -2222,8 +2213,7 @@ XPCOMUtils.defineLazyServiceGetter(PlacesUtils, "tagging",
 
 XPCOMUtils.defineLazyGetter(PlacesUtils, "livemarks", function() {
   return Cc["@mozilla.org/browser/livemark-service;2"].
-         getService(Ci.nsILivemarkService).
-         QueryInterface(Ci.mozIAsyncLivemarks);
+         getService(Ci.mozIAsyncLivemarks);
 });
 
 XPCOMUtils.defineLazyGetter(PlacesUtils, "transactionManager", function() {
@@ -2236,7 +2226,26 @@ XPCOMUtils.defineLazyGetter(PlacesUtils, "transactionManager", function() {
     this.transactionManager.RemoveListener(this);
     this.transactionManager.clear();
   });
-  return tm;
+
+  // Bug 750269
+  // The transaction manager keeps strong references to transactions, and by
+  // that, also to the global for each transaction.  A transaction, however,
+  // could be either the transaction itself (for which the global is this
+  // module) or some js-proxy in another global, usually a window.  The later
+  // would leak because the transaction lifetime (in the manager's stacks)
+  // is independent of the global from which doTransaction was called.
+  // To avoid such a leak, we hide the native doTransaction from callers,
+  // and let each doTransaction call go through this module.
+  // Doing so ensures that, as long as the transaction is any of the
+  // PlacesXXXTransaction objects declared in this module, the object
+  // referenced by the transaction manager has the module itself as global.
+  return Object.create(tm, {
+    "doTransaction": {
+      value: function(aTransaction) {
+        tm.doTransaction(aTransaction);
+      }
+    }
+  });
 });
 
 XPCOMUtils.defineLazyGetter(this, "bundle", function() {
@@ -2356,7 +2365,8 @@ BaseTransaction.prototype = {
  *
  * @return nsITransaction object
  */
-function PlacesAggregatedTransaction(aName, aTransactions)
+this.PlacesAggregatedTransaction =
+ function PlacesAggregatedTransaction(aName, aTransactions)
 {
   // Copy the transactions array to decouple it from its prototype, which
   // otherwise keeps alive its associated global object.
@@ -2439,8 +2449,9 @@ PlacesAggregatedTransaction.prototype = {
  *
  * @return nsITransaction object
  */
-function PlacesCreateFolderTransaction(aTitle, aParentId, aIndex, aAnnotations,
-                                       aChildTransactions)
+this.PlacesCreateFolderTransaction =
+ function PlacesCreateFolderTransaction(aTitle, aParentId, aIndex, aAnnotations,
+                                        aChildTransactions)
 {
   this.item = new TransactionItemCache();
   this.item.title = aTitle;
@@ -2512,9 +2523,10 @@ PlacesCreateFolderTransaction.prototype = {
  *
  * @return nsITransaction object
  */
-function PlacesCreateBookmarkTransaction(aURI, aParentId, aIndex, aTitle,
-                                         aKeyword, aAnnotations,
-                                         aChildTransactions)
+this.PlacesCreateBookmarkTransaction =
+ function PlacesCreateBookmarkTransaction(aURI, aParentId, aIndex, aTitle,
+                                          aKeyword, aAnnotations,
+                                          aChildTransactions)
 {
   this.item = new TransactionItemCache();
   this.item.uri = aURI;
@@ -2578,7 +2590,8 @@ PlacesCreateBookmarkTransaction.prototype = {
  *
  * @return nsITransaction object
  */
-function PlacesCreateSeparatorTransaction(aParentId, aIndex)
+this.PlacesCreateSeparatorTransaction =
+ function PlacesCreateSeparatorTransaction(aParentId, aIndex)
 {
   this.item = new TransactionItemCache();
   this.item.parentId = aParentId;
@@ -2621,8 +2634,9 @@ PlacesCreateSeparatorTransaction.prototype = {
  *
  * @return nsITransaction object
  */
-function PlacesCreateLivemarkTransaction(aFeedURI, aSiteURI, aTitle, aParentId,
-                                         aIndex, aAnnotations)
+this.PlacesCreateLivemarkTransaction =
+ function PlacesCreateLivemarkTransaction(aFeedURI, aSiteURI, aTitle, aParentId,
+                                          aIndex, aAnnotations)
 {
   this.item = new TransactionItemCache();
   this.item.feedURI = aFeedURI;
@@ -2759,7 +2773,8 @@ PlacesRemoveLivemarkTransaction.prototype = {
  *
  * @return nsITransaction object
  */
-function PlacesMoveItemTransaction(aItemId, aNewParentId, aNewIndex)
+this.PlacesMoveItemTransaction =
+ function PlacesMoveItemTransaction(aItemId, aNewParentId, aNewIndex)
 {
   this.item = new TransactionItemCache();
   this.item.id = aItemId;
@@ -2805,7 +2820,8 @@ PlacesMoveItemTransaction.prototype = {
  *
  * @return nsITransaction object
  */
-function PlacesRemoveItemTransaction(aItemId)
+this.PlacesRemoveItemTransaction =
+ function PlacesRemoveItemTransaction(aItemId)
 {
   if (PlacesUtils.isRootItem(aItemId))
     throw Cr.NS_ERROR_INVALID_ARG;
@@ -2938,7 +2954,8 @@ PlacesRemoveItemTransaction.prototype = {
  *
  * @return nsITransaction object
  */
-function PlacesEditItemTitleTransaction(aItemId, aNewTitle)
+this.PlacesEditItemTitleTransaction =
+ function PlacesEditItemTitleTransaction(aItemId, aNewTitle)
 {
   this.item = new TransactionItemCache();
   this.item.id = aItemId;
@@ -2972,7 +2989,8 @@ PlacesEditItemTitleTransaction.prototype = {
  *
  * @return nsITransaction object
  */
-function PlacesEditBookmarkURITransaction(aItemId, aNewURI) {
+this.PlacesEditBookmarkURITransaction =
+ function PlacesEditBookmarkURITransaction(aItemId, aNewURI) {
   this.item = new TransactionItemCache();
   this.item.id = aItemId;
   this.new = new TransactionItemCache();
@@ -3023,7 +3041,8 @@ PlacesEditBookmarkURITransaction.prototype = {
  *
  * @return nsITransaction object
  */
-function PlacesSetItemAnnotationTransaction(aItemId, aAnnotationObject)
+this.PlacesSetItemAnnotationTransaction =
+ function PlacesSetItemAnnotationTransaction(aItemId, aAnnotationObject)
 {
   this.item = new TransactionItemCache();
   this.item.id = aItemId;
@@ -3082,7 +3101,8 @@ PlacesSetItemAnnotationTransaction.prototype = {
  *
  * @return nsITransaction object
  */
-function PlacesSetPageAnnotationTransaction(aURI, aAnnotationObject)
+this.PlacesSetPageAnnotationTransaction =
+ function PlacesSetPageAnnotationTransaction(aURI, aAnnotationObject)
 {
   this.item = new TransactionItemCache();
   this.item.uri = aURI;
@@ -3138,7 +3158,8 @@ PlacesSetPageAnnotationTransaction.prototype = {
  *
  * @return nsITransaction object
  */
-function PlacesEditBookmarkKeywordTransaction(aItemId, aNewKeyword)
+this.PlacesEditBookmarkKeywordTransaction =
+ function PlacesEditBookmarkKeywordTransaction(aItemId, aNewKeyword)
 {
   this.item = new TransactionItemCache();
   this.item.id = aItemId;
@@ -3172,7 +3193,8 @@ PlacesEditBookmarkKeywordTransaction.prototype = {
  *
  * @return nsITransaction object
  */
-function PlacesEditBookmarkPostDataTransaction(aItemId, aPostData)
+this.PlacesEditBookmarkPostDataTransaction =
+ function PlacesEditBookmarkPostDataTransaction(aItemId, aPostData)
 {
   this.item = new TransactionItemCache();
   this.item.id = aItemId;
@@ -3206,7 +3228,8 @@ PlacesEditBookmarkPostDataTransaction.prototype = {
  *
  * @return nsITransaction object
  */
-function PlacesEditItemDateAddedTransaction(aItemId, aNewDateAdded)
+this.PlacesEditItemDateAddedTransaction =
+ function PlacesEditItemDateAddedTransaction(aItemId, aNewDateAdded)
 {
   this.item = new TransactionItemCache();
   this.item.id = aItemId;
@@ -3244,7 +3267,8 @@ PlacesEditItemDateAddedTransaction.prototype = {
  *
  * @return nsITransaction object
  */
-function PlacesEditItemLastModifiedTransaction(aItemId, aNewLastModified)
+this.PlacesEditItemLastModifiedTransaction =
+ function PlacesEditItemLastModifiedTransaction(aItemId, aNewLastModified)
 {
   this.item = new TransactionItemCache();
   this.item.id = aItemId;
@@ -3284,7 +3308,8 @@ PlacesEditItemLastModifiedTransaction.prototype = {
  *
  * @return nsITransaction object
  */
-function PlacesSortFolderByNameTransaction(aFolderId)
+this.PlacesSortFolderByNameTransaction =
+ function PlacesSortFolderByNameTransaction(aFolderId)
 {
   this.item = new TransactionItemCache();  
   this.item.id = aFolderId;
@@ -3370,7 +3395,8 @@ PlacesSortFolderByNameTransaction.prototype = {
  * @param aTags
  *        Array of tags to set for the given URL.
  */
-function PlacesTagURITransaction(aURI, aTags)
+this.PlacesTagURITransaction =
+ function PlacesTagURITransaction(aURI, aTags)
 {
   this.item = new TransactionItemCache();
   this.item.uri = aURI;
@@ -3417,7 +3443,8 @@ PlacesTagURITransaction.prototype = {
  *        Array of tags to unset. pass null to remove all tags from the given
  *        url.
  */
-function PlacesUntagURITransaction(aURI, aTags)
+this.PlacesUntagURITransaction =
+ function PlacesUntagURITransaction(aURI, aTags)
 {
   this.item = new TransactionItemCache();
   this.item.uri = aURI;

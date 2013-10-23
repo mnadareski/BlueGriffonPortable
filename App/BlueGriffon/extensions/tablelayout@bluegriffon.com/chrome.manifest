@@ -1,0 +1,6 @@
+locale tablelayout en-US jar:chrome.jar!/tablelayout-locale/locale/en-US/
+style chrome://bluegriffon/content/xul/bluegriffon.xul chrome://tablelayout/skin/tablelayoutOverlay.css
+style chrome://global/content/customizeToolbar.xul chrome://tablelayout/skin/tablelayoutOverlay.css
+overlay chrome://bluegriffon/content/xul/bluegriffon.xul chrome://tablelayout/content/tablelayoutOverlay.xul
+skin tablelayout classic/1.0 jar:chrome.jar!/tablelayout/skin/
+content tablelayout jar:chrome.jar!/tablelayout/content/

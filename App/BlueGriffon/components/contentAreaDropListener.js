@@ -1,3 +1,7 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
 Components.utils.import("resource://gre/modules/XPCOMUtils.jsm");
 
 const Cc = Components.classes;
@@ -62,12 +66,12 @@ ContentAreaDropListener.prototype =
     uriString = uriString.replace(/^\s*|\s*$/g, '');
 
     let uri;
+    let ioService = Cc["@mozilla.org/network/io-service;1"]
+                      .getService(Components.interfaces.nsIIOService);
     try {
       // Check that the uri is valid first and return an empty string if not.
       // It may just be plain text and should be ignored here
-      uri = Cc["@mozilla.org/network/io-service;1"].
-              getService(Components.interfaces.nsIIOService).
-              newURI(uriString, null, null);
+      uri = ioService.newURI(uriString, null, null);
     } catch (ex) { }
     if (!uri)
       return uriString;
@@ -81,16 +85,19 @@ ContentAreaDropListener.prototype =
       flags |= secMan.DISALLOW_INHERIT_PRINCIPAL;
 
     // Use file:/// as the default uri so that drops of file URIs are always allowed
-    if (sourceNode)
-      secMan.checkLoadURIStrWithPrincipal(sourceNode.nodePrincipal, uriString, flags);
-    else
-      secMan.checkLoadURIStr("file:///", uriString, flags);
+    let principal = sourceNode ? sourceNode.nodePrincipal
+                               : secMan.getSimpleCodebasePrincipal(ioService.newURI("file:///", null, null));
+
+    secMan.checkLoadURIStrWithPrincipal(principal, uriString, flags);
 
     return uriString;
   },
 
   canDropLink: function(aEvent, aAllowSameDocument)
   {
+    if (this._eventTargetIsDisabled(aEvent))
+      return false;
+
     let dataTransfer = aEvent.dataTransfer;
     let types = dataTransfer.types;
     if (!types.contains("application/x-moz-file") &&
@@ -127,6 +134,8 @@ ContentAreaDropListener.prototype =
   dropLink: function(aEvent, aName, aDisallowInherit)
   {
     aName.value = "";
+    if (this._eventTargetIsDisabled(aEvent))
+      return "";
 
     let dataTransfer = aEvent.dataTransfer;
     let [url, name] = this._getDropURL(dataTransfer);
@@ -143,8 +152,20 @@ ContentAreaDropListener.prototype =
       aName.value = name;
 
     return url;
+  },
+
+  _eventTargetIsDisabled: function(aEvent)
+  {
+    let ownerDoc = aEvent.originalTarget.ownerDocument;
+    if (!ownerDoc || !ownerDoc.defaultView)
+      return false;
+
+    return ownerDoc.defaultView
+                   .QueryInterface(Components.interfaces.nsIInterfaceRequestor)
+                   .getInterface(Components.interfaces.nsIDOMWindowUtils)
+                   .isNodeDisabledForEvents(aEvent.originalTarget);
   }
 };
 
 var components = [ContentAreaDropListener];
-const NSGetFactory = XPCOMUtils.generateNSGetFactory(components);
+this.NSGetFactory = XPCOMUtils.generateNSGetFactory(components);

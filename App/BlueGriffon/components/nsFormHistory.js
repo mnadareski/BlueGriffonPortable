@@ -1,39 +1,6 @@
-/* ***** BEGIN LICENSE BLOCK *****
- * Version: MPL 1.1/GPL 2.0/LGPL 2.1
- *
- * The contents of this file are subject to the Mozilla Public License Version
- * 1.1 (the "License"); you may not use this file except in compliance with
- * the License. You may obtain a copy of the License at
- * http://www.mozilla.org/MPL/
- *
- * Software distributed under the License is distributed on an "AS IS" basis,
- * WITHOUT WARRANTY OF ANY KIND, either express or implied. See the License
- * for the specific language governing rights and limitations under the
- * License.
- *
- * The Original Code is mozilla.org code.
- *
- * The Initial Developer of the Original Code is Mozilla Foundation.
- * Portions created by the Initial Developer are Copyright (C) 2010
- * the Initial Developer. All Rights Reserved.
- *
- * Contributor(s):
- *  Justin Dolske <dolske@mozilla.com> (original authors)
- *  Paul O’Shannessy <paul@oshannessy.com> (original authors)
- *
- * Alternatively, the contents of this file may be used under the terms of
- * either the GNU General Public License Version 2 or later (the "GPL"), or
- * the GNU Lesser General Public License Version 2.1 or later (the "LGPL"),
- * in which case the provisions of the GPL or the LGPL are applicable instead
- * of those above. If you wish to allow use of your version of this file only
- * under the terms of either the GPL or the LGPL, and not to allow others to
- * use your version of this file under the terms of the MPL, indicate your
- * decision by deleting the provisions above and replace them with the notice
- * and other provisions required by the GPL or the LGPL. If you do not delete
- * the provisions above, a recipient may use your version of this file under
- * the terms of any one of the MPL, the GPL or the LGPL.
- *
- * ***** END LICENSE BLOCK ***** */
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 
 const Cc = Components.classes;
@@ -54,7 +21,7 @@ FormHistory.prototype = {
     classID          : Components.ID("{0c1bb408-71a2-403f-854a-3a0659829ded}"),
     QueryInterface   : XPCOMUtils.generateQI([Ci.nsIFormHistory2,
                                               Ci.nsIObserver,
-                                              Ci.nsIFrameMessageListener,
+                                              Ci.nsIMessageListener,
                                               Ci.nsISupportsWeakReference,
                                               ]),
 
@@ -106,21 +73,6 @@ FormHistory.prototype = {
         return this._uuidService;
     },
 
-    // Private Browsing Service
-    // If the service is not available, null will be returned.
-    _privBrowsingSvc : undefined,
-    get privBrowsingSvc() {
-        if (this._privBrowsingSvc == undefined) {
-            if ("@mozilla.org/privatebrowsing;1" in Cc)
-                this._privBrowsingSvc = Cc["@mozilla.org/privatebrowsing;1"].
-                                        getService(Ci.nsIPrivateBrowsingService);
-            else
-                this._privBrowsingSvc = null;
-        }
-        return this._privBrowsingSvc;
-    },
-
-
     log : function log(message) {
         if (!this.debug)
             return;
@@ -137,7 +89,7 @@ FormHistory.prototype = {
         this.dbStmts = {};
 
         this.messageManager = Cc["@mozilla.org/globalmessagemanager;1"].
-                              getService(Ci.nsIChromeFrameMessageManager);
+                              getService(Ci.nsIMessageListenerManager);
         this.messageManager.loadFrameScript("chrome://satchel/content/formSubmitListener.js", true);
         this.messageManager.addMessageListener("FormHistory:FormSubmitEntries", this);
 
@@ -176,8 +128,7 @@ FormHistory.prototype = {
 
 
     addEntry : function addEntry(name, value) {
-        if (!this.enabled ||
-            this.privBrowsingSvc && this.privBrowsingSvc.privateBrowsingEnabled)
+        if (!this.enabled)
             return;
 
         this.log("addEntry for " + name + "=" + value);
@@ -333,11 +284,8 @@ FormHistory.prototype = {
             existingTransactionInProgress = this.dbConnection.transactionInProgress;
             if (!existingTransactionInProgress)
                 this.dbConnection.beginTransaction();
-            this.moveToDeletedTable(
-              "SELECT guid, :timeDeleted FROM moz_formhistory", {
-              timeDeleted: Date.now()
-            });
-
+            // TODO: Add these items to the deleted items table once we've sorted
+            //       out the issues from bug 756701
             stmt = this.dbCreateStatement(query);
             stmt.execute();
             this.sendNotification("removeAllEntries", null);
@@ -425,7 +373,7 @@ FormHistory.prototype = {
     },
 
     moveToDeletedTable : function moveToDeletedTable(values, params) {
-//@line 448 "c:\trees\official1.4\toolkit\components\satchel\nsFormHistory.js"
+//@line 396 "c:\trees\official1.7\toolkit\components\satchel\nsFormHistory.js"
     },
 
     get dbConnection() {
@@ -956,7 +904,10 @@ FormHistory.prototype = {
             stmt.finalize();
         }
         this.dbStmts = {};
-        if (this.dbConnection === undefined)
+
+        let connectionDescriptor = Object.getOwnPropertyDescriptor(FormHistory.prototype, "dbConnection");
+        // Return if the database hasn't been opened.
+        if (!connectionDescriptor || connectionDescriptor.value === undefined)
             return;
 
         let completed = false;
@@ -994,4 +945,4 @@ FormHistory.prototype = {
 };
 
 let component = [FormHistory];
-var NSGetFactory = XPCOMUtils.generateNSGetFactory(component);
+this.NSGetFactory = XPCOMUtils.generateNSGetFactory(component);

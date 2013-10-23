@@ -1,0 +1,8 @@
+.autoreg
+jsj.dll
+sqlite3.dll
+xpcom_compat.dll
+xpistub.dll
+zlib.dll
+jemalloc.dll
+LICENSE

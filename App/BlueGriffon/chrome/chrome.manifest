@@ -1,0 +1,61 @@
+locale bluegriffon en-US jar:bluegriffon-en-US.jar!/locale/en-US/bluegriffon/
+locale domexplorer en-US jar:bluegriffon-en-US.jar!/locale/en-US/domexplorer/
+locale stylesheets en-US jar:bluegriffon-en-US.jar!/locale/en-US/stylesheets/
+locale cssproperties en-US jar:bluegriffon-en-US.jar!/locale/en-US/cssproperties/
+locale scripteditor en-US jar:bluegriffon-en-US.jar!/locale/en-US/scripteditor/
+locale branding en-US jar:bluegriffon-en-US.jar!/locale/en-US/branding/
+locale bluegriffon en-US jar:bluegriffon-en-US.jar!/locale/en-US/bluegriffon/
+locale domexplorer en-US jar:bluegriffon-en-US.jar!/locale/en-US/domexplorer/
+locale stylesheets en-US jar:bluegriffon-en-US.jar!/locale/en-US/stylesheets/
+locale cssproperties en-US jar:bluegriffon-en-US.jar!/locale/en-US/cssproperties/
+locale scripteditor en-US jar:bluegriffon-en-US.jar!/locale/en-US/scripteditor/
+locale branding en-US jar:bluegriffon-en-US.jar!/locale/en-US/branding/
+override chrome://global/content/bindings/menulist.xml chrome://bluegriffon/content/bindings/menulist.xml
+style chrome://global/content/customizeToolbar.xul chrome://bluegriffon/skin/editorFormat.css
+skin bluegriffon classic/1.0 jar:bluegriffon.jar!/skin/classic/bluegriffon/
+style chrome://global/content/customizeToolbar.xul chrome://global/skin/
+content bluegriffon jar:bluegriffon.jar!/content/bluegriffon/
+style chrome://global/content/customizeToolbar.xul chrome://bluegriffon/skin/bluegriffon.css
+overlay chrome://bluegriffon/content/xul/bluegriffon.xul chrome://cssproperties/content/csspropertiesOverlay.xul
+content cssproperties jar:cssproperties.jar!/content/cssproperties/
+skin cssproperties classic/1.0 jar:cssproperties.jar!/skin/classic/cssproperties/
+skin domexplorer classic/1.0 jar:domexplorer.jar!/skin/classic/domexplorer/
+style chrome://bluegriffon/content/xul/bluegriffon.xul chrome://domexplorer/skin/domexplorerOverlay.css
+overlay chrome://bluegriffon/content/xul/bluegriffon.xul chrome://domexplorer/content/domexplorerOverlay.xul
+content domexplorer jar:domexplorer.jar!/content/domexplorer/
+locale necko en-US jar:en-US.jar!/locale/en-US/necko/
+locale global-platform en-US jar:en-US.jar!/locale/en-US/global-platform/
+locale global-region en-US jar:en-US.jar!/locale/en-US/global-region/
+locale passwordmgr en-US jar:en-US.jar!/locale/en-US/passwordmgr/
+locale mozapps en-US jar:en-US.jar!/locale/en-US/mozapps/
+locale pipnss en-US jar:en-US.jar!/locale/en-US/pipnss/
+locale alerts en-US jar:en-US.jar!/locale/en-US/alerts/
+locale pippki en-US jar:en-US.jar!/locale/en-US/pippki/
+locale cookie en-US jar:en-US.jar!/locale/en-US/cookie/
+locale global en-US jar:en-US.jar!/locale/en-US/global/
+locale autoconfig en-US jar:en-US.jar!/locale/en-US/autoconfig/
+locale places en-US jar:en-US.jar!/locale/en-US/places/
+content pippki jar:pippki.jar!/content/pippki/
+content recording jar:recording.jar!/content/
+overlay chrome://bluegriffon/content/xul/bluegriffon.xul chrome://scripteditor/content/scripteditorOverlay.xul
+content scripteditor jar:scripteditor.jar!/content/scripteditor/
+skin scripteditor classic/1.0 jar:scripteditor.jar!/skin/classic/scripteditor/
+content stylesheets jar:stylesheets.jar!/content/stylesheets/
+skin stylesheets classic/1.0 jar:stylesheets.jar!/skin/classic/stylesheets/
+overlay chrome://bluegriffon/content/xul/bluegriffon.xul chrome://stylesheets/content/stylesheetsOverlay.xul
+content mozapps jar:toolkit.jar!/content/mozapps/
+content global-platform jar:toolkit.jar!/content/global-platform/ platform
+skin global classic/1.0 jar:toolkit.jar!/skin/classic/global/ os=WINNT osversion<6
+override chrome://global/content/nsTransferable.js chrome://global/content/nsDragAndDrop.js
+content satchel jar:toolkit.jar!/content/satchel/
+content global-region jar:toolkit.jar!/content/global-region/
+content global jar:toolkit.jar!/content/global/ contentaccessible=yes
+resource gre-resources jar:toolkit.jar!/res/
+skin mozapps classic/1.0 jar:toolkit.jar!/skin/classic/aero/mozapps/ os=WINNT osversion>=6
+skin mozapps classic/1.0 jar:toolkit.jar!/skin/classic/mozapps/ os!=WINNT
+content passwordmgr jar:toolkit.jar!/content/passwordmgr/
+skin mozapps classic/1.0 jar:toolkit.jar!/skin/classic/mozapps/ os=WINNT osversion<6
+skin global classic/1.0 jar:toolkit.jar!/skin/classic/aero/global/ os=WINNT osversion>=6
+content xbl-marquee jar:toolkit.jar!/content/xbl-marquee/
+content cookie jar:toolkit.jar!/content/cookie/
+skin global classic/1.0 jar:toolkit.jar!/skin/classic/global/ os!=WINNT

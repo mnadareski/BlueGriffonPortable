@@ -1,38 +1,6 @@
-/* ***** BEGIN LICENSE BLOCK *****
- * Version: MPL 1.1/GPL 2.0/LGPL 2.1
- *
- * The contents of this file are subject to the Mozilla Public License Version
- * 1.1 (the "License"); you may not use this file except in compliance with
- * the License. You may obtain a copy of the License at
- * http://www.mozilla.org/MPL/
- *
- * Software distributed under the License is distributed on an "AS IS" basis,
- * WITHOUT WARRANTY OF ANY KIND, either express or implied. See the License
- * for the specific language governing rights and limitations under the
- * License.
- *
- * The Original Code is ConsoleStorageService code.
- *
- * The Initial Developer of the Original Code is Mozilla Foundation
- * Portions created by the Initial Developer are Copyright (C) 2010
- * the Initial Developer. All Rights Reserved.
- *
- * Contributor(s):
- *  David Dahl <ddahl@mozilla.com>  (Original Author)
- *
- * Alternatively, the contents of this file may be used under the terms of
- * either the GNU General Public License Version 2 or later (the "GPL"), or
- * the GNU Lesser General Public License Version 2.1 or later (the "LGPL"),
- * in which case the provisions of the GPL or the LGPL are applicable instead
- * of those above. If you wish to allow use of your version of this file only
- * under the terms of either the GPL or the LGPL, and not to allow others to
- * use your version of this file under the terms of the MPL, indicate your
- * decision by deleting the provisions above and replace them with the notice
- * and other provisions required by the GPL or the LGPL. If you do not delete
- * the provisions above, a recipient may use your version of this file under
- * the terms of any one of the MPL, the GPL or the LGPL.
- *
- * ***** END LICENSE BLOCK ***** */
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 let Cu = Components.utils;
 let Ci = Components.interfaces;
@@ -43,17 +11,7 @@ Cu.import("resource://gre/modules/Services.jsm");
 
 const STORAGE_MAX_EVENTS = 200;
 
-XPCOMUtils.defineLazyGetter(this, "gPrivBrowsing", function () {
-  // private browsing may not be available in some Gecko Apps
-  try {
-    return Cc["@mozilla.org/privatebrowsing;1"].getService(Ci.nsIPrivateBrowsingService);
-  }
-  catch (ex) {
-    return null;
-  }
-});
-
-var EXPORTED_SYMBOLS = ["ConsoleAPIStorage"];
+this.EXPORTED_SYMBOLS = ["ConsoleAPIStorage"];
 
 var _consoleStorage = {};
 
@@ -78,7 +36,7 @@ var _consoleStorage = {};
  *    // Clear the events for the given inner window ID.
  *    ConsoleAPIStorage.clearEvents(innerWindowID);
  */
-var ConsoleAPIStorage = {
+this.ConsoleAPIStorage = {
 
   QueryInterface: XPCOMUtils.generateQI([Ci.nsIObserver]),
 
@@ -96,7 +54,8 @@ var ConsoleAPIStorage = {
       this.clearEvents(innerWindowID);
     }
     else if (aTopic == "memory-pressure") {
-      if (aData == "low-memory") {
+      /* Handle both low-memory and low-memory-no-forward events */
+      if (aData.startsWith("low-memory")) {
         this.clearEvents();
       }
     }
@@ -111,17 +70,33 @@ var ConsoleAPIStorage = {
   },
 
   /**
-   * Get the events array by inner window ID.
+   * Get the events array by inner window ID or all events from all windows.
    *
-   * @param string aId
-   *        The inner window ID for which you want to get the array of cached
-   *        events.
+   * @param string [aId]
+   *        Optional, the inner window ID for which you want to get the array of
+   *        cached events.
    * @returns array
-   *          The array of cached events for the given window.
+   *          The array of cached events for the given window. If no |aId| is
+   *          given this function returns all of the cached events, from any
+   *          window.
    */
   getEvents: function CS_getEvents(aId)
   {
-    return (_consoleStorage[aId] || []).slice(0);
+    if (aId != null) {
+      return (_consoleStorage[aId] || []).slice(0);
+    }
+
+    let ids = [];
+
+    for each (let events in _consoleStorage) {
+      ids.push(events);
+    }
+
+    let result = [].concat.apply([], ids);
+
+    return result.sort(function(a, b) {
+      return a.timeStamp - b.timeStamp;
+    });
   },
 
   /**
@@ -137,10 +112,6 @@ var ConsoleAPIStorage = {
     let ID = parseInt(aWindowID);
     if (isNaN(ID)) {
       throw new Error("Invalid window ID argument");
-    }
-
-    if (gPrivBrowsing && gPrivBrowsing.privateBrowsingEnabled) {
-      return;
     }
 
     if (!_consoleStorage[ID]) {

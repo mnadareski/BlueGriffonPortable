@@ -1,0 +1,6 @@
+overlay chrome://bluegriffon/content/xul/bluegriffon.xul chrome://csseditor/content/csseditorOverlay.xul
+skin csseditor classic/1.0 jar:chrome.jar!/csseditor/skin/
+style chrome://global/content/customizeToolbar.xul chrome://csseditor/skin/csseditorOverlay.css
+style chrome://bluegriffon/content/xul/bluegriffon.xul chrome://csseditor/skin/csseditorOverlay.css
+content csseditor jar:chrome.jar!/csseditor/content/
+locale csseditor en-US jar:chrome.jar!/csseditor-locale/locale/en-US/

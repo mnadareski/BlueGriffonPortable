@@ -125,8 +125,19 @@ nsBlueGriffonContentHandler.prototype = {
   handle : function bch_handle(cmdLine) {
     if (!cmdLine.length)
       return;
+
+    var url = null;
+//@line 131 "c:\trees\official1.7\bluegriffon\components\bgCommandHandler.js"
+    if (cmdLine.length == 1) {
+      var arg = cmdLine.getArgument(0);
+      if (arg[0] != "-")
+        url = arg;
+    }
+//@line 137 "c:\trees\official1.7\bluegriffon\components\bgCommandHandler.js"
+
     var ar = cmdLine.handleFlagWithParam("file", false);
-    if (ar) {
+    if (ar || url) {
+      cmdLine.preventDefault = true;
       var wm = Components.classes["@mozilla.org/appshell/window-mediator;1"]
                          .getService(nsIWindowMediator);
       var e = Services.wm.getEnumerator("bluegriffon");
@@ -135,7 +146,7 @@ nsBlueGriffonContentHandler.prototype = {
         mostRecent = e.getNext();
       }
       if (mostRecent) {
-        var localFile = UrlUtils.newLocalFile(ar);
+        var localFile = UrlUtils.newLocalFile(ar || url);
         var ioService =
           Components.classes["@mozilla.org/network/io-service;1"]
                     .getService(Components.interfaces.nsIIOService);
@@ -152,7 +163,25 @@ nsBlueGriffonContentHandler.prototype = {
         return;
       }
       else
-        openWindow(null, gBlueGriffonContentHandler.chromeURL, "_blank", "chrome,dialog=no,all", ar);
+        openWindow(null, gBlueGriffonContentHandler.chromeURL, "_blank", "chrome,dialog=no,all", ar || url);
+    }
+
+    url = cmdLine.handleFlagWithParam("url", false);
+    if (url) {
+      cmdLine.preventDefault = true;
+      if (mostRecent) {
+        var navNav = mostRecent.QueryInterface(nsIInterfaceRequestor)
+                           .getInterface(nsIWebNavigation);
+        var rootItem = navNav.QueryInterface(nsIDocShellTreeItem).rootTreeItem;
+        var rootWin = rootItem.QueryInterface(nsIInterfaceRequestor)
+                              .getInterface(nsIDOMWindow);
+        rootWin.OpenFile(url, true);
+        return;
+      }
+      return openWindow(null, "chrome://bluegriffon/content/xul/bluegriffon.xul",
+                               "_blank",
+                               "chrome,dialog=no,all",
+                               url);
     }
   },
 
@@ -161,7 +190,7 @@ nsBlueGriffonContentHandler.prototype = {
   /* nsIContentHandler */
 
   handleContent : function bch_handleContent(contentType, context, request) {
-    Services.prompt(null, "a", "b")
+    Services.prompt.alert(null, "nsBlueGriffonContentHandler", "handleContent");
   }
 };
 
@@ -190,13 +219,13 @@ nsDefaultCommandLineHandler.prototype = {
   handle : function dch_handle(cmdLine) {
 
     var url = null;
-//@line 194 "c:\trees\official1.4\bluegriffon\components\bgCommandHandler.js"
+//@line 223 "c:\trees\official1.7\bluegriffon\components\bgCommandHandler.js"
     if (cmdLine.length == 1) {
       var arg = cmdLine.getArgument(0);
       if (arg[0] != "-")
         url = arg;
     }
-//@line 200 "c:\trees\official1.4\bluegriffon\components\bgCommandHandler.js"
+//@line 229 "c:\trees\official1.7\bluegriffon\components\bgCommandHandler.js"
 
     var wm = Components.classes["@mozilla.org/appshell/window-mediator;1"]
                        .getService(nsIWindowMediator);
@@ -208,6 +237,7 @@ nsDefaultCommandLineHandler.prototype = {
 
     var ar = cmdLine.handleFlagWithParam("file", false);
     if (ar || url) {
+       cmdLine.preventDefault = true;
       if (mostRecent) {
         var localFile = UrlUtils.newLocalFile(ar || url);
         var ioService =
@@ -226,15 +256,16 @@ nsDefaultCommandLineHandler.prototype = {
         return;
       }
 
-//@line 232 "c:\trees\official1.4\bluegriffon\components\bgCommandHandler.js"
+//@line 262 "c:\trees\official1.7\bluegriffon\components\bgCommandHandler.js"
       return openWindow(null, "chrome://bluegriffon/content/xul/bluegriffon.xul",
                                "_blank",
                                "chrome,dialog=no,all",
                                ar || url);
-//@line 237 "c:\trees\official1.4\bluegriffon\components\bgCommandHandler.js"
+//@line 267 "c:\trees\official1.7\bluegriffon\components\bgCommandHandler.js"
     }
     url = cmdLine.handleFlagWithParam("url", false);
     if (url) {
+    	cmdLine.preventDefault = true;
       if (mostRecent) {
         var navNav = mostRecent.QueryInterface(nsIInterfaceRequestor)
                            .getInterface(nsIWebNavigation);
@@ -253,15 +284,17 @@ nsDefaultCommandLineHandler.prototype = {
       mostRecent.focus();
       return mostRecent;
     }
-//@line 266 "c:\trees\official1.4\bluegriffon\components\bgCommandHandler.js"
-    return openWindow(null, "chrome://bluegriffon/content/xul/bluegriffon.xul",
-                             "_blank",
-                             "chrome,dialog=no,all",
-                             "");
-//@line 271 "c:\trees\official1.4\bluegriffon\components\bgCommandHandler.js"
+//@line 297 "c:\trees\official1.7\bluegriffon\components\bgCommandHandler.js"
+    if (!cmdLine.preventDefault)
+      return openWindow(null, "chrome://bluegriffon/content/xul/bluegriffon.xul",
+                               "_blank",
+                               "chrome,dialog=no,all",
+                               "");
+//@line 303 "c:\trees\official1.7\bluegriffon\components\bgCommandHandler.js"
+
   },
 
-//@line 288 "c:\trees\official1.4\bluegriffon\components\bgCommandHandler.js"
+//@line 321 "c:\trees\official1.7\bluegriffon\components\bgCommandHandler.js"
 
   helpInfo : ""
 };

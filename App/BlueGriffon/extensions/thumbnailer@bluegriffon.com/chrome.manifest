@@ -1,0 +1,6 @@
+content thumbnailer jar:chrome.jar!/tablelayout/content/
+locale thumbnailer en-US jar:chrome.jar!/thumbnailer-locale/locale/en-US/
+style chrome://global/content/customizeToolbar.xul chrome://thumbnailer/skin/thumbnailerOverlay.css
+overlay chrome://bluegriffon/content/xul/bluegriffon.xul chrome://thumbnailer/content/thumbnailerOverlay.xul
+skin thumbnailer classic/1.0 jar:chrome.jar!/tablelayout/skin/
+style chrome://bluegriffon/content/xul/bluegriffon.xul chrome://thumbnailer/skin/thumbnailerOverlay.css

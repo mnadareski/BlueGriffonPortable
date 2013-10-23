@@ -1,0 +1,3 @@
+overlay chrome://bluegriffon/content/xul/bluegriffon.xul chrome://tipoftheday/content/tipofthedayOverlay.xul
+content tipoftheday jar:chrome.jar!/tipoftheday/content/tipoftheday/
+locale tipoftheday en-US jar:chrome.jar!/tipoftheday-en-US/locale/en-US/tipoftheday/

@@ -1,0 +1,4 @@
+content snippets jar:chrome.jar!/snippets/content/snippets/
+locale snippets en-US jar:chrome.jar!/snippets-locale/locale/en-US/snippets/
+skin snippets classic/1.0 jar:chrome.jar!/snippets/skin/classic/snippets/
+overlay chrome://bluegriffon/content/xul/bluegriffon.xul chrome://snippets/content/snippetsOverlay.xul

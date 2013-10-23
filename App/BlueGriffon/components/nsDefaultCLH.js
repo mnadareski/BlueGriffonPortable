@@ -1,4 +1,6 @@
-//@line 38 "c:\trees\official1.4\toolkit\components\nsDefaultCLH.js"
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 Components.utils.import("resource://gre/modules/XPCOMUtils.jsm");
 
@@ -42,7 +44,7 @@ nsDefaultCLH.prototype = {
 
   handle : function clh_handle(cmdLine) {
     var printDir;
-    while (printDir = cmdLine.handleFlagWithParam("print-xpcom-dir", false)) {
+    while ((printDir = cmdLine.handleFlagWithParam("print-xpcom-dir", false))) {
       var out = "print-xpcom-dir(\"" + printDir + "\"): ";
       try {
         out += getDirectoryService().get(printDir, nsIFile).path;
@@ -56,8 +58,8 @@ nsDefaultCLH.prototype = {
     }
 
     var printDirList;
-    while (printDirList = cmdLine.handleFlagWithParam("print-xpcom-dirlist",
-                                                      false)) {
+    while ((printDirList = cmdLine.handleFlagWithParam("print-xpcom-dirlist",
+                                                       false))) {
       out = "print-xpcom-dirlist(\"" + printDirList + "\"): ";
       try {
         var list = getDirectoryService().get(printDirList,
@@ -120,4 +122,4 @@ nsDefaultCLH.prototype = {
   helpInfo : "",
 };
 
-var NSGetFactory = XPCOMUtils.generateNSGetFactory([nsDefaultCLH]);
+this.NSGetFactory = XPCOMUtils.generateNSGetFactory([nsDefaultCLH]);

@@ -1,0 +1,4 @@
+content fs jar:chrome.jar!/fs/content/fs/
+skin fs classic/1.0 jar:chrome.jar!/fs/skin/classic/fs/
+locale fs en-US jar:chrome.jar!/fs-en-US/locale/en-US/fs/
+overlay chrome://bluegriffon/content/xul/bluegriffon.xul chrome://fs/content/fsOverlay.xul

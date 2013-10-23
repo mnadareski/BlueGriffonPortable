@@ -1,4 +1,5 @@
-EXPORTED_SYMBOLS = [ "BadCertHandler", "checkCert", "readCertPrefs", "validateCert" ];
+//@line 7 "c:\trees\official1.7\toolkit\mozapps\shared\CertUtils.jsm"
+this.EXPORTED_SYMBOLS = [ "BadCertHandler", "checkCert", "readCertPrefs", "validateCert" ];
 
 const Ce = Components.Exception;
 const Ci = Components.interfaces;
@@ -25,7 +26,8 @@ Components.utils.import("resource://gre/modules/Services.jsm");
  * @return An array of JS objects with names / values corresponding to the
  *         expected certificate's attribute names / values.
  */
-function readCertPrefs(aPrefBranch) {
+this.readCertPrefs =
+  function readCertPrefs(aPrefBranch) {
   if (Services.prefs.getBranch(aPrefBranch).getChildList("").length == 0)
     return null;
 
@@ -64,7 +66,8 @@ function readCertPrefs(aPrefBranch) {
  *         aCertificate wasn't specified and aCerts is not null or an empty
  *         array.
  */
-function validateCert(aCertificate, aCerts) {
+this.validateCert =
+  function validateCert(aCertificate, aCerts) {
   // If there are no certificate requirements then just exit
   if (!aCerts || aCerts.length == 0)
     return;
@@ -100,7 +103,7 @@ function validateCert(aCertificate, aCerts) {
   }
 
   if (error) {
-    errors.forEach(Cu.reportError);
+    errors.forEach(Cu.reportError.bind(Cu));
     const certCheckErr = "Certificate checks failed. See previous errors " +
                          "for details.";
     Cu.reportError(certCheckErr);
@@ -131,7 +134,8 @@ function validateCert(aCertificate, aCerts) {
  *         from the aCerts  param is different than the expected value.
  *         NS_ERROR_ABORT if the certificate issuer is not built-in.
  */
-function checkCert(aChannel, aAllowNonBuiltInCerts, aCerts) {
+this.checkCert =
+  function checkCert(aChannel, aAllowNonBuiltInCerts, aCerts) {
   if (!aChannel.originalURI.schemeIs("https")) {
     // Require https if there are certificate values to verify
     if (aCerts) {
@@ -178,7 +182,8 @@ function isBuiltinToken(tokenName) {
  *         When true certificates that aren't builtin are allowed. When false
  *         or not specified the certificate must be a builtin certificate.
  */
-function BadCertHandler(aAllowNonBuiltInCerts) {
+this.BadCertHandler =
+  function BadCertHandler(aAllowNonBuiltInCerts) {
   this.allowNonBuiltInCerts = aAllowNonBuiltInCerts;
 }
 BadCertHandler.prototype = {
@@ -199,16 +204,6 @@ BadCertHandler.prototype = {
     callback.onRedirectVerifyCallback(Components.results.NS_OK);
   },
 
-  // Suppress any certificate errors
-  notifyCertProblem: function(socketInfo, status, targetSite) {
-    return true;
-  },
-
-  // Suppress any ssl errors
-  notifySSLError: function(socketInfo, error, targetSite) {
-    return true;
-  },
-
   // nsIInterfaceRequestor
   getInterface: function(iid) {
     return this.QueryInterface(iid);
@@ -217,8 +212,6 @@ BadCertHandler.prototype = {
   // nsISupports
   QueryInterface: function(iid) {
     if (!iid.equals(Ci.nsIChannelEventSink) &&
-        !iid.equals(Ci.nsIBadCertListener2) &&
-        !iid.equals(Ci.nsISSLErrorListener) &&
         !iid.equals(Ci.nsIInterfaceRequestor) &&
         !iid.equals(Ci.nsISupports))
       throw Cr.NS_ERROR_NO_INTERFACE;
