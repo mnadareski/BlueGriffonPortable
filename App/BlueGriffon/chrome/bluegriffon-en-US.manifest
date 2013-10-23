@@ -1,0 +1,6 @@
+locale    stylesheets    en-US		jar:bluegriffon-en-US.jar!/locale/en-US/stylesheets/
+locale    cssproperties    en-US    jar:bluegriffon-en-US.jar!/locale/en-US/cssproperties/
+locale    branding       en-US    jar:bluegriffon-en-US.jar!/locale/en-US/branding/
+locale    bluegriffon    en-US    jar:bluegriffon-en-US.jar!/locale/en-US/bluegriffon/
+locale    domexplorer    en-US    jar:bluegriffon-en-US.jar!/locale/en-US/domexplorer/
+locale    scripteditor    en-US		jar:bluegriffon-en-US.jar!/locale/en-US/scripteditor/

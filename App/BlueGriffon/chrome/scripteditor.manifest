@@ -1,0 +1,3 @@
+overlay   chrome://bluegriffon/content/xul/bluegriffon.xul		chrome://scripteditor/content/scripteditorOverlay.xul
+content   scripteditor    			jar:scripteditor.jar!/content/scripteditor/
+skin		scripteditor    classic/1.0 jar:scripteditor.jar!/skin/classic/scripteditor/
