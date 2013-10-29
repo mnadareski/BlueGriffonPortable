@@ -1,6 +1,0 @@
-override chrome://global/content/bindings/menulist.xml chrome://bluegriffon/content/bindings/menulist.xml
-style  chrome://global/content/customizeToolbar.xul    chrome://bluegriffon/skin/editorFormat.css
-style  chrome://global/content/customizeToolbar.xul    chrome://global/skin/
-skin    bluegriffon    classic/1.0 jar:bluegriffon.jar!/skin/classic/bluegriffon/
-style  chrome://global/content/customizeToolbar.xul    chrome://bluegriffon/skin/bluegriffon.css
-content   bluegriffon          jar:bluegriffon.jar!/content/bluegriffon/

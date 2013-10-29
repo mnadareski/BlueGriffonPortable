@@ -1,3 +1,0 @@
-overlay   chrome://bluegriffon/content/xul/bluegriffon.xul		chrome://stylesheets/content/stylesheetsOverlay.xul
-skin		stylesheets    classic/1.0 jar:stylesheets.jar!/skin/classic/stylesheets/
-content   stylesheets    			jar:stylesheets.jar!/content/stylesheets/

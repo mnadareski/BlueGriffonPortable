@@ -1,4 +1,0 @@
-skin      domexplorer         classic/1.0 jar:domexplorer.jar!/skin/classic/domexplorer/
-content   domexplorer          jar:domexplorer.jar!/content/domexplorer/
-overlay   chrome://bluegriffon/content/xul/bluegriffon.xul    chrome://domexplorer/content/domexplorerOverlay.xul
-style     chrome://bluegriffon/content/xul/bluegriffon.xul    chrome://domexplorer/skin/domexplorerOverlay.css

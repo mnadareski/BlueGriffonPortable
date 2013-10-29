@@ -1,3 +1,0 @@
-overlay   chrome://bluegriffon/content/xul/bluegriffon.xul    chrome://cssproperties/content/csspropertiesOverlay.xul
-skin      cssproperties         classic/1.0 jar:cssproperties.jar!/skin/classic/cssproperties/
-content   cssproperties          jar:cssproperties.jar!/content/cssproperties/
